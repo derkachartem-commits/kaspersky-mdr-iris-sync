@@ -108,6 +108,18 @@ class Syncer:
         """
         return bool(self.cfg.get("safety", {}).get(key, False))
 
+    def _sync_allowed(self, row: Dict[str, Any]) -> bool:
+        """Limit status/comment sync to selected MDR incidents or IRIS alerts."""
+        sync_cfg = self.cfg.get("sync", {})
+        numbers = {str(item) for item in (sync_cfg.get("only_incident_numbers") or [])}
+        alert_ids = {str(item) for item in (sync_cfg.get("only_alert_ids") or [])}
+        if not numbers and not alert_ids:
+            return True
+        return (
+            str(row.get("incident_number") or "") in numbers
+            or str(row.get("alert_id") or "") in alert_ids
+        )
+
     def _merge_target(self, incident: Dict[str, Any]) -> Optional[int]:
         by_tenant = self.mapping_cfg.get("merge_target_by_tenant") or {}
         tenant = str(incident.get("tenant_name") or "")
@@ -407,6 +419,8 @@ class Syncer:
         policy = str(self.mapping_cfg.get("conflict_policy", "mdr_wins"))
 
         for row in rows:
+            if not self._sync_allowed(row):
+                continue
             incident_id = str(row["incident_id"])
             try:
                 incident = self._get_incident_data(row)
@@ -654,6 +668,8 @@ class Syncer:
         iris_ignore = self.iris_cfg.get("ignore_comment_authors") or []
 
         for row in rows:
+            if not self._sync_allowed(row):
+                continue
             if processed >= limit:
                 self.log.info("comment sync: cycle limit %s reached", limit)
                 break

@@ -24,6 +24,10 @@ DEFAULTS: Dict[str, Any] = {
         "allow_status_changes": False,
         "allow_comments": False,
     },
+    "sync": {
+        "only_incident_numbers": [],
+        "only_alert_ids": [],
+    },
     "proxy": {
         "enabled": False,
         "url": "http://127.0.0.1:10808",
