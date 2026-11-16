@@ -79,6 +79,8 @@ def affected_hosts(incident: Dict[str, Any]) -> List[Dict[str, str]]:
     hosts: List[Dict[str, str]] = []
 
     mappings = incident.get("affected_hosts_mappings")
+    mapped_ids = set()
+    mapped_names = set()
     if isinstance(mappings, list):
         for item in mappings:
             if isinstance(item, dict):
@@ -90,18 +92,29 @@ def affected_hosts(incident: Dict[str, Any]) -> List[Dict[str, str]]:
                             "host_id": str(item.get("host_id") or ""),
                         }
                     )
+                    mapped_names.add(str(name).lower())
+                    if item.get("host_id"):
+                        mapped_ids.add(str(item.get("host_id")))
             elif item:
                 hosts.append({"name": str(item), "host_id": ""})
+                mapped_names.add(str(item).lower())
 
     raw_hosts = incident.get("affected_hosts")
     if isinstance(raw_hosts, list):
         for item in raw_hosts:
             if isinstance(item, dict):
                 name = item.get("host_name") or item.get("name")
-                if name:
-                    hosts.append({"name": str(name), "host_id": str(item.get("host_id") or "")})
+                host_id = str(item.get("host_id") or "")
+                if name and str(name).lower() not in mapped_names and host_id not in mapped_ids:
+                    hosts.append({"name": str(name), "host_id": host_id})
             elif item:
-                hosts.append({"name": str(item), "host_id": ""})
+                raw_name = str(item)
+                name_part, _, id_part = raw_name.partition(":")
+                if id_part and (id_part in mapped_ids or name_part.lower() in mapped_names):
+                    continue
+                if not id_part and raw_name.lower() in mapped_names:
+                    continue
+                hosts.append({"name": raw_name, "host_id": ""})
 
     deduped: List[Dict[str, str]] = []
     seen = set()
@@ -260,6 +273,10 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
     }
     if source_link:
         payload["alert_source_link"] = source_link
+
+    recommendations = incident.get("recommendations")
+    if recommendations:
+        payload["alert_note"] = truncate(str(recommendations), 4000)
 
     event_time = epoch_ms_to_iso(incident.get("creation_time"))
     if event_time:
