@@ -1,0 +1,94 @@
+{
+  "log": {
+    "file": "logs/mdr-iris-sync.log",
+    "level": "INFO",
+    "max_mb": 10,
+    "backups": 5
+  },
+  "interval_seconds": 180,
+  "state_db": "state/sync.db",
+
+  "proxy": {
+    "enabled": false,
+    "url": "http://127.0.0.1:10808",
+    "http": "",
+    "https": "",
+    "no_proxy": ["127.0.0.1", "localhost"]
+  },
+
+  "mdr": {
+    "proxy": null,
+    "api_url": "https://mdr.kaspersky.com/api/v1",
+    "client_id": "PASTE_CLIENT_ID",
+    "refresh_token": "PASTE_JWT_REFRESH_TOKEN",
+    "tokens_file": "state/mdr_tokens.json",
+    "verify": true,
+    "ca_bundle": null,
+    "timeout": 60,
+    "page_size": 100,
+    "max_pages": 100,
+    "initial_lookback_hours": 24,
+    "max_incidents_per_cycle": 100,
+    "ignore_comment_authors": ["MDR Integration"],
+    "token_refresh": {
+      "refresh_before_seconds": 180,
+      "retry_delay_seconds": 5,
+      "max_delay_seconds": 300,
+      "check_interval_seconds": 30
+    }
+  },
+
+  "iris": {
+    "proxy": null,
+    "api_url": "https://127.0.0.1:8445",
+    "api_key": "PASTE_IRIS_API_KEY",
+    "verify": false,
+    "ca_bundle": null,
+    "timeout": 60,
+    "customer_id": 1,
+    "classification_id": 1,
+    "asset_type_id": null,
+    "alert_status_id": 1,
+    "case_status_id": 2,
+    "closed_case_status_id": 3,
+    "closed_alert_status_id": 3,
+    "comments_object": "case",
+    "send_context": true,
+    "ignore_comment_authors": ["administrator"]
+  },
+
+  "mapping": {
+    "mode": "escalate",
+    "merge_target_case_id": null,
+    "merge_target_by_tenant": {},
+    "severity": {
+      "LOW": 2,
+      "NORMAL": 3,
+      "MEDIUM": 3,
+      "HIGH": 4,
+      "CRITICAL": 5,
+      "": 3
+    },
+    "default_severity_id": 3,
+    "status_to_iris": {
+      "new": 1,
+      "in progress": 2,
+      "closed": 3,
+      "resolved": 3,
+      "escalated": 2
+    },
+    "default_alert_status_id": 1,
+    "close_mdr_resolution": "TRUE_POSITIVE",
+    "close_mdr_summary": "Closed in DFIR-IRIS",
+    "sync_case_status": true,
+    "reopen_iris_case": false,
+    "conflict_policy": "mdr_wins",
+    "source_name": "Kaspersky MDR",
+    "source_link_template": "https://mdr.kaspersky.com/incidents/{incident_id}",
+    "tags": ["MDR", "Kaspersky"],
+    "title_prefix": "[MDR]",
+    "comment_prefix_mdr": "[MDR]",
+    "comment_prefix_iris": "[IRIS]",
+    "max_comments_per_cycle": 100
+  }
+}

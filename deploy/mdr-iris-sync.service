@@ -1,0 +1,27 @@
+[Unit]
+Description=Kaspersky MDR to DFIR-IRIS synchronization
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mdr-sync
+Group=mdr-sync
+WorkingDirectory=/opt/mdr-iris-sync
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/mdr-iris-sync/.venv/bin/python -m mdr_iris_sync --config /opt/mdr-iris-sync/config.json
+Restart=always
+RestartSec=10
+# The refresh procedure has its own retries; systemd restarts only on crash.
+TimeoutStopSec=30
+
+# Hardening (adjust paths to your layout)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mdr-iris-sync/state /opt/mdr-iris-sync/logs
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
