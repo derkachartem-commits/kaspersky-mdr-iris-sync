@@ -14,10 +14,10 @@ class MappingTests(unittest.TestCase):
         self.assertIsNone(mapping.epoch_ms_to_iso("not-a-number"))
 
     def test_priority_to_severity(self):
-        self.assertEqual(mapping.priority_to_severity("LOW"), 2)
-        self.assertEqual(mapping.priority_to_severity("HIGH"), 4)
-        self.assertEqual(mapping.priority_to_severity("CRITICAL"), 5)
-        self.assertEqual(mapping.priority_to_severity("unknown"), 3)
+        self.assertEqual(mapping.priority_to_severity("LOW"), 4)
+        self.assertEqual(mapping.priority_to_severity("HIGH"), 5)
+        self.assertEqual(mapping.priority_to_severity("CRITICAL"), 6)
+        self.assertEqual(mapping.priority_to_severity("unknown"), 2)
 
     def test_status_mapping_default(self):
         statuses = {"new": 1, "closed": 3}
@@ -55,8 +55,8 @@ class MappingTests(unittest.TestCase):
         }
         payload = mapping.build_alert_payload(incident, cfg)
         self.assertEqual(payload["alert_customer_id"], 7)
-        self.assertEqual(payload["alert_classification_id"], 4)
-        self.assertEqual(payload["alert_severity_id"], 4)
+        self.assertEqual(payload["alert_classification_id"], 7)
+        self.assertEqual(payload["alert_severity_id"], 5)
         self.assertEqual(payload["alert_status_id"], 2)
         self.assertIn("#42", payload["alert_title"])
         self.assertIn("PC-1", payload["alert_description"])

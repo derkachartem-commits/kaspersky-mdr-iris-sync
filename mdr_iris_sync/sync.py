@@ -292,11 +292,45 @@ class Syncer:
             _iso_from_ms(max(0, watermark)),
         )
 
+    def _sync_alert_metadata(
+        self, row: Dict[str, Any], incident: Dict[str, Any]
+    ) -> None:
+        alert_id = row.get("alert_id")
+        if not alert_id:
+            return
+        payload = mapping.build_alert_payload(incident, self.cfg)
+        target_severity = int(payload["alert_severity_id"])
+        target_classification = int(payload["alert_classification_id"])
+        try:
+            alert = self.iris.get_alert(int(alert_id))
+            changes: Dict[str, int] = {}
+            if mapping.as_int(alert.get("alert_severity_id")) != target_severity:
+                changes["alert_severity_id"] = target_severity
+            if mapping.as_int(alert.get("alert_classification_id")) != target_classification:
+                changes["alert_classification_id"] = target_classification
+            if not changes:
+                return
+            self.iris.update_alert(int(alert_id), changes)
+            self.log.info(
+                "incident %s: IRIS alert #%s metadata updated: %s",
+                row.get("incident_id"),
+                alert_id,
+                changes,
+            )
+        except Exception:  # noqa: BLE001
+            self.stats["errors"] += 1
+            self.log.exception(
+                "incident %s: cannot update IRIS alert #%s metadata",
+                row.get("incident_id"),
+                alert_id,
+            )
+
     def _ensure_alert(self, incident: Dict[str, Any]) -> None:
         incident_id = str(incident.get("incident_id"))
         row = self.db.get_incident(incident_id)
 
         if row:
+            self._sync_alert_metadata(row, incident)
             if not row.get("case_id"):
                 self._ensure_case(row, incident)
             return

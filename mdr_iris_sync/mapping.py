@@ -36,14 +36,81 @@ def epoch_ms_to_iso(value: Any) -> Optional[str]:
 
 def priority_to_severity(priority: Any) -> int:
     mapping = {
-        "low": 2,
-        "normal": 3,
-        "medium": 3,
-        "high": 4,
-        "critical": 5,
-        "": 3,
+        "low": 4,
+        "normal": 1,
+        "medium": 1,
+        "high": 5,
+        "critical": 6,
+        "": 2,
     }
-    return mapping.get(normalize(priority), 3)
+    return mapping.get(normalize(priority), 2)
+
+
+def classify_incident(incident: Dict[str, Any], mapping_cfg: Dict[str, Any]) -> int:
+    """Map MDR indicators to an IRIS case classification id."""
+    text = " ".join(
+        str(incident.get(key) or "")
+        for key in ("summary", "description", "status_description", "attack_stage")
+    ).lower()
+    techniques = " ".join(
+        str(item) for item in (incident.get("mitre_techniques") or [])
+    ).lower()
+
+    def cid(name: str, fallback: int) -> int:
+        return int(mapping_cfg.get(name, fallback))
+
+    if "t1003" in techniques or any(
+        word in text for word in ("lsass", "credential dumping", "дамп памяти")
+    ):
+        return cid("classification_intrusion_id", 18)
+    if any(
+        word in text
+        for word in (
+            "backdoor",
+            "trojan",
+            "malware",
+            "вредоносное",
+            "вредоносный",
+            "regsvr32",
+            "rundll32",
+        )
+    ) or any(
+        t in techniques
+        for t in (
+            "t1105",
+            "t1218",
+            "t1059",
+            "t1053",
+            "t1543",
+            "t1547",
+            "t1548",
+            "t1112",
+            "t1569",
+        )
+    ):
+        return cid("classification_malware_id", 7)
+    if "t1566" in techniques or any(
+        word in text
+        for word in (
+            "фишинг",
+            "phishing",
+            "подозрительное письмо",
+            "почтовое вложение",
+            "spearphishing",
+        )
+    ):
+        return cid("classification_phishing_id", 30)
+    if any(word in text for word in ("уязвимость", "vulnerability", "vipnet")):
+        return cid("classification_vulnerability_id", 31)
+    if "t1555" in techniques or any(
+        word in text for word in ("credential access", "spyware", "rat")
+    ):
+        return cid("classification_intrusion_id", 18)
+    if any(t in techniques for t in ("t1021", "t1570")) or "lateral movement" in text:
+        return cid("classification_intrusion_id", 18)
+    if any(word in text for word in ("ioc", "индикаторы компрометации")):
+        return cid("classification_other_id", 36)
+    return cid("classification_default_id", 36)
 
 
 def status_to_alert_status(status: Any, mapping: Dict[str, int], default: int) -> int:
@@ -268,7 +335,7 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
         "alert_severity_id": severity_id,
         "alert_status_id": status_id,
         "alert_customer_id": int(iris_cfg["customer_id"]),
-        "alert_classification_id": int(iris_cfg["classification_id"]),
+        "alert_classification_id": classify_incident(incident, mapping_cfg),
         "alert_tags": ",".join(tags),
     }
     if source_link:
