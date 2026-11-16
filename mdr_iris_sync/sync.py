@@ -452,6 +452,15 @@ class Syncer:
                 )
 
                 if not mdr_changed and not iris_changed:
+                    iris_closed = (
+                        self._is_case_closed(case, _case_status_id(case))
+                        if case
+                        else iris_alert_status == closed_alert_id
+                    )
+                    if iris_closed:
+                        # Backfill/retry the close note even when both sides
+                        # already agree on the closed state.
+                        self._send_close_note(incident_id, alert, case)
                     continue
 
                 apply_from_iris = False
@@ -577,6 +586,58 @@ class Syncer:
                 target_case_status,
             )
 
+    def _close_note(self, alert: Dict[str, Any], case: Dict[str, Any]) -> str:
+        """Return the note entered when the IRIS object was closed."""
+        if case:
+            for key in (
+                "case_resolution_note",
+                "resolution_note",
+                "case_close_note",
+                "case_note",
+                "note",
+            ):
+                value = case.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        for key in ("alert_note", "close_note", "note"):
+            value = alert.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    def _send_close_note(
+        self, incident_id: str, alert: Dict[str, Any], case: Dict[str, Any]
+    ) -> None:
+        """Copy the IRIS close note to MDR before closing the incident."""
+        if not self._allow("allow_comments"):
+            return
+        note = self._close_note(alert, case)
+        if not note:
+            return
+        source_key = f"close-note:{incident_id}"
+        if self.db.comment_seen("iris2mdr", source_key):
+            return
+        created = str(alert.get("date_update") or case.get("case_close_date") or "")
+        formatted = mapping.format_comment(
+            self.mapping_cfg.get("comment_prefix_iris", "[IRIS]"),
+            "Close note",
+            created,
+            note,
+        )
+        try:
+            self.mdr.create_comment(incident_id, formatted)
+        except MDRApiError:
+            self.stats["errors"] += 1
+            self.log.exception(
+                "incident %s: cannot send IRIS close note to MDR", incident_id
+            )
+            return
+        self.db.mark_comment(
+            "iris2mdr", source_key, content_hash=mapping.fingerprint(note)
+        )
+        self.stats["comments_iris_to_mdr"] += 1
+        self.log.info("incident %s: IRIS close note copied to MDR", incident_id)
+
     def _apply_iris_to_mdr(
         self,
         row: Dict[str, Any],
@@ -595,14 +656,18 @@ class Syncer:
         )
         mdr_closed = self._is_mdr_closed(mdr_status)
 
-        if iris_closed and not mdr_closed:
-            self.mdr.close_incident(
-                incident_id,
-                str(self.mapping_cfg.get("close_mdr_resolution", "TRUE_POSITIVE")),
-                str(self.mapping_cfg.get("close_mdr_summary", "Closed in DFIR-IRIS")),
-            )
-            self.stats["status_updates_mdr"] += 1
-            self.log.info("incident %s closed in MDR from IRIS", incident_id)
+        if iris_closed:
+            # Send the close note once, including for incidents that were
+            # already closed before this feature was enabled.
+            self._send_close_note(incident_id, alert, case)
+            if not mdr_closed:
+                self.mdr.close_incident(
+                    incident_id,
+                    str(self.mapping_cfg.get("close_mdr_resolution", "TRUE_POSITIVE")),
+                    str(self.mapping_cfg.get("close_mdr_summary", "Closed in DFIR-IRIS")),
+                )
+                self.stats["status_updates_mdr"] += 1
+                self.log.info("incident %s closed in MDR from IRIS", incident_id)
         elif mdr_closed and not iris_closed:
             self.log.warning(
                 "incident %s: IRIS case/alert was reopened, but the MDR API has no "
