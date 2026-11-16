@@ -452,15 +452,6 @@ class Syncer:
                 )
 
                 if not mdr_changed and not iris_changed:
-                    iris_closed = (
-                        self._is_case_closed(case, _case_status_id(case))
-                        if case
-                        else iris_alert_status == closed_alert_id
-                    )
-                    if iris_closed:
-                        # Backfill/retry the close note even when both sides
-                        # already agree on the closed state.
-                        self._send_close_note(incident_id, alert, case)
                     continue
 
                 apply_from_iris = False
@@ -656,18 +647,15 @@ class Syncer:
         )
         mdr_closed = self._is_mdr_closed(mdr_status)
 
-        if iris_closed:
-            # Send the close note once, including for incidents that were
-            # already closed before this feature was enabled.
+        if iris_closed and not mdr_closed:
             self._send_close_note(incident_id, alert, case)
-            if not mdr_closed:
-                self.mdr.close_incident(
-                    incident_id,
-                    str(self.mapping_cfg.get("close_mdr_resolution", "TRUE_POSITIVE")),
-                    str(self.mapping_cfg.get("close_mdr_summary", "Closed in DFIR-IRIS")),
-                )
-                self.stats["status_updates_mdr"] += 1
-                self.log.info("incident %s closed in MDR from IRIS", incident_id)
+            self.mdr.close_incident(
+                incident_id,
+                str(self.mapping_cfg.get("close_mdr_resolution", "TRUE_POSITIVE")),
+                str(self.mapping_cfg.get("close_mdr_summary", "Closed in DFIR-IRIS")),
+            )
+            self.stats["status_updates_mdr"] += 1
+            self.log.info("incident %s closed in MDR from IRIS", incident_id)
         elif mdr_closed and not iris_closed:
             self.log.warning(
                 "incident %s: IRIS case/alert was reopened, but the MDR API has no "
