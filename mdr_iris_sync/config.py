@@ -45,6 +45,8 @@ DEFAULTS: Dict[str, Any] = {
         "page_size": 100,
         "max_pages": 100,
         "initial_lookback_hours": 24,
+        "include_statuses": [],
+        "ignore_statuses": ["closed", "resolved"],
         "max_incidents_per_cycle": 100,
         "ignore_comment_authors": [],
         "token_refresh": {

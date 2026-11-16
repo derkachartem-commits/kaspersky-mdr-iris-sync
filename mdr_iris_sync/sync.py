@@ -225,9 +225,14 @@ class Syncer:
             min_update = int((time.time() - lookback_hours * 3600) * 1000)
 
         self.log.info("ingest: MDR incidents updated since %s", _iso_from_ms(min_update))
+        filters: Dict[str, Any] = {}
+        include_statuses = self.mdr_cfg.get("include_statuses") or []
+        if include_statuses:
+            filters["statuses"] = include_statuses
         incidents = self.mdr.list_incidents(
             min_update_time=min_update,
             fields=self.mdr_cfg.get("incident_fields"),
+            **filters,
         )
         incidents.sort(key=lambda item: int(item.get("update_time") or 0))
         self.stats["incidents_seen"] = len(incidents)
