@@ -401,7 +401,27 @@ def comment_author(comment: Dict[str, Any]) -> str:
         value = comment.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    user = comment.get("user")
+    if isinstance(user, dict):
+        for key in ("user_name", "name", "user_login"):
+            value = user.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
     return "unknown"
+
+
+def comment_login(comment: Dict[str, Any]) -> str:
+    for key in ("comment_user_login", "user_login", "login", "username"):
+        value = comment.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    user = comment.get("user")
+    if isinstance(user, dict):
+        for key in ("user_login", "login", "username"):
+            value = user.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
 
 
 def comment_created(comment: Dict[str, Any]) -> str:
@@ -422,9 +442,12 @@ def comment_created(comment: Dict[str, Any]) -> str:
 
 
 def format_comment(
-    prefix: str, author: str, created: str, text: str
+    prefix: str, author: str, created: str, text: str, login: Optional[str] = None
 ) -> str:
-    header = f"**{prefix} {author}**"
+    display = author
+    if login and login.strip() and login.strip().lower() not in display.lower():
+        display = f"{display} ({login.strip()})"
+    header = f"**{prefix} {display}**"
     if created:
         header += f" — {created}"
     return f"{header}\n\n{text}"

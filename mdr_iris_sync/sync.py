@@ -741,10 +741,11 @@ class Syncer:
 
                 text = mapping.comment_text(comment)
                 author = mapping.comment_author(comment)
+                login = mapping.comment_login(comment)
                 if not text:
                     self.db.mark_comment("iris2mdr", source_key)
                     continue
-                if self._comment_author_ignored(author, iris_ignore):
+                if self._comment_author_ignored(author, iris_ignore) or self._comment_author_ignored(login, iris_ignore):
                     self.db.mark_comment("iris2mdr", source_key)
                     continue
 
@@ -760,6 +761,7 @@ class Syncer:
                     author,
                     mapping.comment_created(comment),
                     _comment_body(text),
+                    login=login,
                 )
                 try:
                     self.mdr.create_comment(incident_id, formatted)
