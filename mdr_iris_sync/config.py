@@ -82,7 +82,7 @@ DEFAULTS: Dict[str, Any] = {
         "case_status_id": 2,
         "closed_case_status_id": 3,
         "closed_alert_status_id": 3,
-        "comments_object": "case",
+        "comments_object": "auto",
         "send_context": True,
         "ignore_comment_authors": [],
     },

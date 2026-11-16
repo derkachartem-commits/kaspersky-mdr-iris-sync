@@ -143,23 +143,68 @@ class IrisClient:
         data = self._data(raw)
         return data if isinstance(data, dict) else {}
 
+    def update_case_state(self, case_id: int, status_id: int) -> Dict[str, Any]:
+        """Set a case status across IRIS v2 and v3.
+
+        v2 uses ``status_id``; v3 uses ``state_id``. Sending both is safe on
+        both versions because their schemas ignore unknown fields.
+        """
+        status_id = int(status_id)
+        payloads = [
+            {"state_id": status_id, "status_id": status_id},
+            {"status_id": status_id},
+            {"state_id": status_id},
+        ]
+        last_error: Optional[IrisApiError] = None
+        for payload in payloads:
+            try:
+                return self.update_case(case_id, payload)
+            except IrisApiError as exc:
+                if exc.status_code not in (400, 422):
+                    raise
+                last_error = exc
+        if last_error:
+            raise last_error
+        raise IrisApiError(f"cannot update status of IRIS case {case_id}")
+
     def close_case(
         self, case_id: int, status_id: int, resolution_note: Optional[str] = None
     ) -> Dict[str, Any]:
         """Close a case.
 
-        The v2 API accepts ``status_id`` on ``PUT /api/v2/cases/<id>``. Older
-        installations may require the legacy ``/case/close/<id>`` route, so it
-        is used as a fallback.
+        IRIS v3.0.0-beta.1 exposes ``POST /api/v2/cases/<id>/close``; v2.4
+        used ``status_id`` on ``PUT /api/v2/cases/<id>`` and the legacy
+        ``/case/close/<id>`` route. All three are tried for compatibility.
         """
-        payload: Dict[str, Any] = {"status_id": int(status_id)}
+        body: Dict[str, Any] = {
+            "state_id": int(status_id),
+            "status_id": int(status_id),
+        }
         if resolution_note:
-            payload["case_resolution_note"] = resolution_note
+            body["case_resolution_note"] = resolution_note
+
         try:
-            return self.update_case(case_id, payload)
+            raw = self._request(
+                "POST",
+                f"/api/v2/cases/{int(case_id)}/close",
+                json_body=body,
+                expected=(200, 201),
+            )
+            data = self._data(raw)
+            return data if isinstance(data, dict) else {}
+        except IrisApiError as exc:
+            if exc.status_code not in (404, 405):
+                self.log.warning(
+                    "POST /api/v2/cases/%s/close failed (%s); trying PUT status",
+                    case_id,
+                    exc,
+                )
+
+        try:
+            return self.update_case_state(case_id, status_id)
         except IrisApiError as exc:
             self.log.warning(
-                "PUT /api/v2/cases/%s failed (%s); falling back to /case/close",
+                "PUT status for IRIS case %s failed (%s); falling back to /case/close",
                 case_id,
                 exc,
             )
@@ -167,7 +212,7 @@ class IrisClient:
         raw = self._request(
             "POST",
             f"/case/close/{int(case_id)}",
-            json_body=payload,
+            json_body=body,
             expected=(200, 201),
         )
         data = self._data(raw)

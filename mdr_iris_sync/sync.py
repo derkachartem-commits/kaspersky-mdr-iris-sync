@@ -42,14 +42,7 @@ def _comment_body(text: str) -> str:
 
 
 def _case_status_id(case: Dict[str, Any]) -> Optional[int]:
-    for key in ("status_id", "case_status_id"):
-        value = mapping.as_int(case.get(key))
-        if value is not None:
-            return value
-    status = case.get("status")
-    if isinstance(status, dict):
-        return mapping.as_int(status.get("status_id") or status.get("id"))
-    return None
+    return mapping.case_status_id(case)
 
 
 def _iris_timestamp(obj: Dict[str, Any]) -> int:
@@ -132,14 +125,9 @@ class Syncer:
         return mapping.normalize(status) in ("closed", "resolved", "archived")
 
     def _is_case_closed(self, case: Dict[str, Any], status_id: Optional[int]) -> bool:
-        if status_id is not None and status_id == int(
-            self.iris_cfg.get("closed_case_status_id", 3)
-        ):
-            return True
-        if case.get("case_close_date"):
-            return True
-        name = mapping.status_name_from_case(case)
-        return mapping.normalize(name) in ("closed", "resolved")
+        return mapping.case_is_closed(
+            case, status_id if status_id is not None else self.iris_cfg.get("closed_case_status_id")
+        )
 
     def _comment_author_ignored(self, author: str, ignore: Any) -> bool:
         ignored = {str(item).strip().lower() for item in (ignore or []) if item}
@@ -524,8 +512,8 @@ class Syncer:
             target_case_status = int(self.iris_cfg.get("case_status_id", 2))
 
         if target_case_status != iris_case_status:
-            self.iris.update_case(
-                int(row["case_id"]), {"status_id": target_case_status}
+            self.iris.update_case_state(
+                int(row["case_id"]), target_case_status
             )
             self.stats["status_updates_iris"] += 1
             self.log.info(
@@ -570,6 +558,52 @@ class Syncer:
             )
 
     # ------------------------------------------------------------- comments
+    def _comment_thread(
+        self, row: Dict[str, Any]
+    ) -> tuple[str, int, List[Dict[str, Any]]]:
+        """Return the IRIS object that actually holds comments.
+
+        IRIS v2 stores comments on cases and alerts. IRIS v3.0.0-beta.1 has
+        alert comments but no case-comments route, so ``auto`` falls back to
+        the alert thread instead of failing the whole sync cycle.
+        """
+        mode = str(self.iris_cfg.get("comments_object", "auto")).lower()
+        case_id = row.get("case_id")
+        alert_id = row.get("alert_id")
+
+        candidates: List[tuple[str, Any]] = []
+        if mode == "alert":
+            candidates = [("alerts", alert_id)]
+        elif mode == "case":
+            candidates = [("cases", case_id)] if case_id else [("alerts", alert_id)]
+        else:
+            if case_id:
+                candidates.append(("cases", case_id))
+            if alert_id:
+                candidates.append(("alerts", alert_id))
+
+        last_error: Optional[Exception] = None
+        for object_type, object_id in candidates:
+            if not object_id:
+                continue
+            try:
+                comments = self.iris.list_comments(object_type, int(object_id))
+                return object_type, int(object_id), comments
+            except IrisApiError as exc:
+                if mode == "auto" and exc.status_code in (404, 405):
+                    self.log.info(
+                        "comment sync: %s comments unavailable for #%s; trying fallback",
+                        object_type,
+                        object_id,
+                    )
+                    last_error = exc
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        raise RuntimeError(f"incident {row.get('incident_id')} has no comment target")
+
     def _sync_comments(self) -> None:
         rows = self.db.list_incidents()
         if not rows:
@@ -588,10 +622,7 @@ class Syncer:
             incident_id = str(row["incident_id"])
             try:
                 mdr_comments = self.mdr.list_comments(incident_id)
-                use_case = bool(row.get("case_id"))
-                object_type = "cases" if use_case else "alerts"
-                object_id = int(row["case_id"] if use_case else row["alert_id"])
-                iris_comments = self.iris.list_comments(object_type, object_id)
+                object_type, object_id, iris_comments = self._comment_thread(row)
             except Exception:  # noqa: BLE001
                 self.stats["errors"] += 1
                 self.log.exception("comment sync: cannot fetch comments for %s", incident_id)

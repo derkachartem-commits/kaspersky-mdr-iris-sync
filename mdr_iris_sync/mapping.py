@@ -336,4 +336,38 @@ def status_name_from_case(case: Dict[str, Any]) -> str:
         value = case.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    for key in ("state", "status"):
+        nested = case.get(key)
+        if isinstance(nested, dict):
+            for nested_key in ("state_name", "status_name", "name"):
+                value = nested.get(nested_key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
     return ""
+
+
+def case_status_id(case: Dict[str, Any]) -> Optional[int]:
+    """Case status id for both IRIS v2 (status_id) and v3 (state_id)."""
+    for key in ("state_id", "status_id", "case_status_id"):
+        value = as_int(case.get(key))
+        if value is not None:
+            return value
+    for key in ("state", "status"):
+        nested = case.get(key)
+        if isinstance(nested, dict):
+            for nested_key in ("state_id", "status_id", "id"):
+                value = as_int(nested.get(nested_key))
+                if value is not None:
+                    return value
+    return None
+
+
+def case_is_closed(case: Dict[str, Any], closed_status_id: Optional[int]) -> bool:
+    """Works with IRIS v2 (status_id/close date) and v3 (state_id/close_date)."""
+    status_id = case_status_id(case)
+    if closed_status_id is not None and status_id == int(closed_status_id):
+        return True
+    for key in ("close_date", "case_close_date"):
+        if case.get(key):
+            return True
+    return normalize(status_name_from_case(case)) in ("closed", "resolved")

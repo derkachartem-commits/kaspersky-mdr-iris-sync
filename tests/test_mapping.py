@@ -86,6 +86,14 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(mapping.comment_author(mdr_comment), "MDR Team")
         self.assertIn("2023-11-14", mapping.comment_created(mdr_comment))
 
+    def test_case_status_v2_and_v3(self):
+        self.assertEqual(mapping.case_status_id({"status_id": 3}), 3)
+        self.assertEqual(mapping.case_status_id({"state_id": 4}), 4)
+        self.assertEqual(mapping.case_status_id({"state": {"state_id": 5}}), 5)
+        self.assertTrue(mapping.case_is_closed({"state_id": 3}, 3))
+        self.assertTrue(mapping.case_is_closed({"close_date": "2026-11-16"}, 99))
+        self.assertFalse(mapping.case_is_closed({"state_id": 2}, 3))
+
     def test_fingerprint_ignores_whitespace_and_case(self):
         self.assertEqual(
             mapping.fingerprint("Hello   World"),
