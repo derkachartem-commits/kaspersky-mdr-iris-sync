@@ -18,6 +18,12 @@ DEFAULTS: Dict[str, Any] = {
     },
     "interval_seconds": 180,
     "state_db": "state/sync.db",
+    "safety": {
+        "allow_alert_creation": True,
+        "allow_case_creation": True,
+        "allow_status_changes": False,
+        "allow_comments": False,
+    },
     "proxy": {
         "enabled": False,
         "url": "http://127.0.0.1:10808",

@@ -8,6 +8,13 @@
   "interval_seconds": 180,
   "state_db": "state/sync.db",
 
+  "safety": {
+    "allow_alert_creation": true,
+    "allow_case_creation": true,
+    "allow_status_changes": false,
+    "allow_comments": false
+  },
+
   "proxy": {
     "enabled": false,
     "url": "http://127.0.0.1:10808",

@@ -100,6 +100,14 @@ class Syncer:
             "errors": 0,
         }
 
+    def _allow(self, key: str) -> bool:
+        """Production safety switches.
+
+        Status and comment writes are disabled by default. Enable them only
+        for a lab instance, never for a production tenant.
+        """
+        return bool(self.cfg.get("safety", {}).get(key, False))
+
     def _merge_target(self, incident: Dict[str, Any]) -> Optional[int]:
         by_tenant = self.mapping_cfg.get("merge_target_by_tenant") or {}
         tenant = str(incident.get("tenant_name") or "")
@@ -165,17 +173,29 @@ class Syncer:
             self.stats["errors"] += 1
             self.log.exception("incident ingestion failed")
 
-        try:
-            self._sync_statuses()
-        except Exception:  # noqa: BLE001
-            self.stats["errors"] += 1
-            self.log.exception("status synchronization failed")
+        if self._allow("allow_status_changes"):
+            try:
+                self._sync_statuses()
+            except Exception:  # noqa: BLE001
+                self.stats["errors"] += 1
+                self.log.exception("status synchronization failed")
+        else:
+            self.log.info(
+                "status sync disabled by safety policy "
+                "(safety.allow_status_changes=false)"
+            )
 
-        try:
-            self._sync_comments()
-        except Exception:  # noqa: BLE001
-            self.stats["errors"] += 1
-            self.log.exception("comment synchronization failed")
+        if self._allow("allow_comments"):
+            try:
+                self._sync_comments()
+            except Exception:  # noqa: BLE001
+                self.stats["errors"] += 1
+                self.log.exception("comment synchronization failed")
+        else:
+            self.log.info(
+                "comment sync disabled by safety policy "
+                "(safety.allow_comments=false)"
+            )
 
         self.db.set_kv("last_cycle_at", int(time.time()))
         self.db.set_kv("last_cycle_ok", 1 if not self.stats["errors"] else 0)
@@ -189,6 +209,13 @@ class Syncer:
 
     # --------------------------------------------------------------- ingest
     def _ingest(self) -> None:
+        if not self._allow("allow_alert_creation"):
+            self.log.info(
+                "ingest disabled by safety policy "
+                "(safety.allow_alert_creation=false)"
+            )
+            return
+
         last_update = self.db.get_kv_int("last_mdr_update_time", 0)
         if last_update:
             # 60 s overlap protects against clock skew and inclusive bounds.
@@ -296,6 +323,13 @@ class Syncer:
             self._ensure_case(row, incident)
 
     def _ensure_case(self, row: Dict[str, Any], incident: Dict[str, Any]) -> None:
+        if not self._allow("allow_case_creation"):
+            self.log.info(
+                "case creation disabled by safety policy "
+                "(safety.allow_case_creation=false)"
+            )
+            return
+
         incident_id = str(row["incident_id"])
         alert_id = row.get("alert_id")
         if not alert_id:

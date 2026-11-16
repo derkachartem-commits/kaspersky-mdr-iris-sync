@@ -252,6 +252,23 @@ sudo systemctl enable --now mdr-iris-sync
 
 Если IRIS и скрипт находятся в одном Docker-сети, вместо `127.0.0.1` укажите имя сервиса IRIS (например, `https://iris-nginx`), а `iris.proxy` оставьте выключенным.
 
+## Production safety
+
+По умолчанию запись статусов и комментариев **выключена**:
+
+```json
+"safety": {
+  "allow_alert_creation": true,
+  "allow_case_creation": true,
+  "allow_status_changes": false,
+  "allow_comments": false
+}
+```
+
+В таком режиме интеграция только импортирует инциденты MDR как алерты и (если разрешено) создаёт/мерджит кейсы. Она **не** обновляет статусы IRIS, не закрывает инциденты MDR и не пишет комментарии ни в одну сторону.
+
+Включать `allow_status_changes` / `allow_comments` можно только на тестовом стенде. Для production оставляйте оба флага `false`. Если нужно запретить вообще любые изменения, поставьте также `allow_alert_creation: false` и `allow_case_creation: false` — тогда скрипт будет работать в режиме чтения.
+
 ## Как работает синхронизация
 
 ### Импорт инцидентов
