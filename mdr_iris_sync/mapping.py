@@ -257,6 +257,8 @@ def build_escalation_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> D
             f"(`{incident_id}`)."
         ),
         "import_as_event": True,
+        "iocs_import_list": [],
+        "assets_import_list": [],
     }
 
 
@@ -270,6 +272,8 @@ def build_merge_payload(incident: Dict[str, Any], target_case_id: int) -> Dict[s
             f"(`{incident_id}`)."
         ),
         "import_as_event": True,
+        "iocs_import_list": [],
+        "assets_import_list": [],
     }
 
 
