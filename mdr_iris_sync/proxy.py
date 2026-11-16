@@ -18,7 +18,28 @@ A per-service ``"proxy": null`` (or omitted key) inherits the global setting,
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
+
+
+def _with_credentials(url: str, username: Any, password: Any = None) -> str:
+    """Inject proxy credentials into a proxy URL."""
+    if not url or not username:
+        return url
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        userinfo = quote(str(username), safe="")
+        if password not in (None, ""):
+            userinfo += ":" + quote(str(password), safe="")
+        return urlunsplit(
+            (parts.scheme, f"{userinfo}@{host}", parts.path, parts.query, parts.fragment)
+        )
+    except ValueError:
+        return url
 
 
 def _mask_proxy_url(url: str) -> str:
@@ -63,6 +84,12 @@ def resolve_proxy_config(
     https_proxy = merged.get("https") or merged.get("url")
     if not http_proxy and not https_proxy:
         return None
+
+    username = merged.get("username")
+    password = merged.get("password")
+    if username:
+        http_proxy = _with_credentials(http_proxy, username, password)
+        https_proxy = _with_credentials(https_proxy, username, password)
 
     no_proxy = merged.get("no_proxy") or []
     if isinstance(no_proxy, str):

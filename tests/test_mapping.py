@@ -102,6 +102,19 @@ class ProxyTests(unittest.TestCase):
         proxies = proxies_for_url(resolved, "https://mdr.kaspersky.com")
         self.assertEqual(proxies["https"], "http://127.0.0.1:10808")
 
+    def test_proxy_credentials(self):
+        cfg = {
+            "enabled": True,
+            "url": "http://proxy.corp.local:3128",
+            "username": "svc@corp",
+            "password": "p@ss word",
+        }
+        resolved = resolve_proxy_config(cfg)
+        self.assertEqual(
+            resolved["https"],
+            "http://svc%40corp:p%40ss%20word@proxy.corp.local:3128",
+        )
+
     def test_service_override_and_disable(self):
         base = {"enabled": True, "url": "http://127.0.0.1:10808"}
         override = resolve_proxy_config(base, {"url": "socks5h://127.0.0.1:1080"})

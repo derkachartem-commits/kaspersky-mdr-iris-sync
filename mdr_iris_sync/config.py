@@ -23,6 +23,8 @@ DEFAULTS: Dict[str, Any] = {
         "url": "http://127.0.0.1:10808",
         "http": "",
         "https": "",
+        "username": "",
+        "password": "",
         "no_proxy": ["127.0.0.1", "localhost"],
     },
     "mdr": {
