@@ -113,6 +113,58 @@ def affected_hosts(incident: Dict[str, Any]) -> List[Dict[str, str]]:
     return deduped
 
 
+def extract_iocs(incident: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Collect and deduplicate MDR IOCs from all supported fields."""
+    raw: List[Dict[str, Any]] = []
+    for key in ("iocs", "host_based_iocs", "network_based_iocs"):
+        value = incident.get(key)
+        if isinstance(value, list):
+            raw.extend(item for item in value if isinstance(item, dict))
+
+    result: List[Dict[str, Any]] = []
+    seen = set()
+    for ioc in raw:
+        value = str(ioc.get("data") or ioc.get("value") or ioc.get("ioc") or "").strip()
+        if not value:
+            continue
+        key = (value.lower(), normalize(ioc.get("type")))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(ioc)
+    return result
+
+
+def ioc_type_id(ioc: Dict[str, Any]) -> int:
+    """Map an MDR IOC type/value to an IRIS ioc_type id."""
+    ioc_type = normalize(ioc.get("type"))
+    value = str(ioc.get("data") or ioc.get("value") or "").strip().lower()
+    if ioc_type in ("hash", "filehash", "file_hash"):
+        digest = value[2:] if value.startswith("0x") else value
+        return {32: 90, 40: 111, 64: 113}.get(len(digest), 96)  # md5, sha1, sha256, other
+    return {
+        "ip": 76,
+        "ipv4": 76,
+        "ipv6": 76,
+        "ip-any": 76,
+        "domain": 20,
+        "hostname": 69,
+        "url": 141,
+        "uri": 140,
+        "filename": 37,
+        "file": 37,
+        "file-path": 97,
+        "file_path": 97,
+        "path": 97,
+        "email": 22,
+        "md5": 90,
+        "sha1": 111,
+        "sha256": 113,
+        "regkey": 109,
+        "mutex": 94,
+    }.get(ioc_type, 96)
+
+
 def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     mapping_cfg = cfg["mapping"]
     iris_cfg = cfg["iris"]
@@ -143,6 +195,7 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
     )
 
     hosts = affected_hosts(incident)
+    iocs = extract_iocs(incident)
     tags = list(mapping_cfg.get("tags", []))
     priority = incident.get("priority")
     if priority:
@@ -159,11 +212,17 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
     ]
     if incident.get("tenant_name"):
         lines.append(f"**Tenant:** {incident['tenant_name']}")
+    if incident.get("detection_technology"):
+        lines.append(f"**Detection technology:** {incident['detection_technology']}")
+    if incident.get("attack_stage"):
+        lines.append(f"**Attack stage:** {incident['attack_stage']}")
     if hosts:
         lines.append(
             "**Affected hosts:** "
             + ", ".join(f"`{host['name']}`" for host in hosts)
         )
+    if iocs:
+        lines.append(f"**IOCs:** {len(iocs)}")
     tactics = incident.get("mitre_tactics") or []
     techniques = incident.get("mitre_techniques") or []
     if tactics:
@@ -172,6 +231,8 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
         lines.append(
             "**MITRE techniques:** " + ", ".join(str(item) for item in techniques)
         )
+    if incident.get("recommendations"):
+        lines.extend(["", "**Recommendations:**", str(incident["recommendations"])])
     source_link = ""
     template = mapping_cfg.get("source_link_template") or ""
     if template:
@@ -221,6 +282,19 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
             assets.append(asset)
         payload["alert_assets"] = assets
 
+    if iocs:
+        payload["alert_iocs"] = [
+            {
+                "ioc_value": str(ioc.get("data") or ioc.get("value") or ""),
+                "ioc_description": str(
+                    ioc.get("message") or ioc.get("description") or "Kaspersky MDR IOC"
+                ),
+                "ioc_type_id": ioc_type_id(ioc),
+                "ioc_tags": "MDR",
+            }
+            for ioc in iocs
+        ]
+
     if iris_cfg.get("send_context", True):
         payload["alert_context"] = {
             "mdr": {
@@ -229,6 +303,10 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
                 "priority": incident.get("priority"),
                 "status": incident.get("status"),
                 "tenant_name": incident.get("tenant_name"),
+                "detection_technology": incident.get("detection_technology"),
+                "attack_stage": incident.get("attack_stage"),
+                "ioc_count": len(iocs),
+                "asset_count": len(hosts),
                 "creation_time": incident.get("creation_time"),
                 "update_time": incident.get("update_time"),
             }

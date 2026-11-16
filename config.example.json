@@ -10,7 +10,7 @@
 
   "safety": {
     "allow_alert_creation": true,
-    "allow_case_creation": true,
+    "allow_case_creation": false,
     "allow_status_changes": false,
     "allow_comments": false
   },
@@ -57,10 +57,10 @@
     "customer_id": 1,
     "classification_id": 1,
     "asset_type_id": null,
-    "alert_status_id": 1,
+    "alert_status_id": 2,
     "case_status_id": 2,
     "closed_case_status_id": 3,
-    "closed_alert_status_id": 3,
+    "closed_alert_status_id": 6,
     "comments_object": "auto",
     "send_context": true,
     "ignore_comment_authors": ["administrator"]
@@ -80,13 +80,15 @@
     },
     "default_severity_id": 3,
     "status_to_iris": {
-      "new": 1,
-      "in progress": 2,
-      "closed": 3,
-      "resolved": 3,
-      "escalated": 2
+      "open": 2,
+      "on hold": 5,
+      "new": 2,
+      "in progress": 4,
+      "closed": 6,
+      "resolved": 6,
+      "escalated": 8
     },
-    "default_alert_status_id": 1,
+    "default_alert_status_id": 2,
     "close_mdr_resolution": "TRUE_POSITIVE",
     "close_mdr_summary": "Closed in DFIR-IRIS",
     "sync_case_status": true,
