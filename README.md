@@ -204,6 +204,54 @@ python -m mdr_iris_sync --config config.json --once
 
 Пример unit-файла — `deploy/mdr-iris-sync.service`.
 
+## Развёртывание на сервере IRIS
+
+Типовая схема — скрипт работает на том же хосте, что и DFIR-IRIS, и обращается к MDR через корпоративный web-прокси:
+
+```
+DFIR-IRIS (127.0.0.1:443)  <--  mdr-iris-sync  -->  web proxy  -->  mdr.kaspersky.com:443
+```
+
+Настройки для этого варианта:
+
+- `iris.api_url` — локальный адрес IRIS: `https://127.0.0.1:443`, `https://127.0.0.1:8445` и т.п. Порт зависит от того, как опубликован nginx IRIS.
+- `iris.proxy.enabled` — `false`: запросы к локальному IRIS не должны идти через прокси. `127.0.0.1`/`localhost` также можно держать в `no_proxy`.
+- `iris.verify` — `false` для самоподписанного сертификата либо путь к CA в `iris.ca_bundle`.
+- `mdr.proxy` — корпоративный web-прокси. Через него идут все запросы к MDR, включая обновление токена.
+- `mdr.verify` — `true` (MDR использует доверенный сертификат); при необходимости `mdr.ca_bundle`.
+
+Готовый пример: `examples/config.iris-server.json`.
+
+Секреты лучше держать не в `config.json`, а в `.env` рядом (systemd-юнит читает `EnvironmentFile=-/opt/mdr-iris-sync/.env`):
+
+```ini
+MDR_CLIENT_ID=...
+MDR_REFRESH_TOKEN=***
+IRIS_API_KEY=***
+MDR_PROXY_URL=http://proxy.corp.local:3128
+# IRIS_API_URL=https://127.0.0.1:443
+```
+
+Установка на хост IRIS:
+
+```bash
+sudo mkdir -p /opt/mdr-iris-sync
+sudo cp -r . /opt/mdr-iris-sync
+cd /opt/mdr-iris-sync
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+cp examples/config.iris-server.json config.json
+cp deploy/mdr-iris-sync.env.example .env
+chmod 600 config.json .env
+# отредактируйте config.json и .env
+sudo cp deploy/mdr-iris-sync.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mdr-iris-sync
+```
+
+Если IRIS и скрипт находятся в одном Docker-сети, вместо `127.0.0.1` укажите имя сервиса IRIS (например, `https://iris-nginx`), а `iris.proxy` оставьте выключенным.
+
 ## Как работает синхронизация
 
 ### Импорт инцидентов

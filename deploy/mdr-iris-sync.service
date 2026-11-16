@@ -9,6 +9,7 @@ User=mdr-sync
 Group=mdr-sync
 WorkingDirectory=/opt/mdr-iris-sync
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/mdr-iris-sync/.env
 ExecStart=/opt/mdr-iris-sync/.venv/bin/python -m mdr_iris_sync --config /opt/mdr-iris-sync/config.json
 Restart=always
 RestartSec=10
