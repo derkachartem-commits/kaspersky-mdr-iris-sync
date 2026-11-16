@@ -57,6 +57,7 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(payload["alert_customer_id"], 7)
         self.assertEqual(payload["alert_classification_id"], 7)
         self.assertEqual(payload["alert_severity_id"], 5)
+        self.assertIsNone(payload["alert_owner_id"])
         self.assertEqual(payload["alert_status_id"], 2)
         self.assertIn("#42", payload["alert_title"])
         self.assertIn("PC-1", payload["alert_description"])

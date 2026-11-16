@@ -334,6 +334,7 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
         "alert_source_ref": incident_id,
         "alert_severity_id": severity_id,
         "alert_status_id": status_id,
+        "alert_owner_id": None,
         "alert_customer_id": int(iris_cfg["customer_id"]),
         "alert_classification_id": classify_incident(incident, mapping_cfg),
         "alert_tags": ",".join(tags),
