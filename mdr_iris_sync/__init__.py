@@ -7,4 +7,4 @@ The package contains a small, dependency-light integration:
 * :mod:`mdr_iris_sync.sync` - the synchronization engine.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"

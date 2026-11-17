@@ -14,6 +14,7 @@ Key points
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import logging
 import os
@@ -23,6 +24,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
+
+try:  # POSIX only: used to serialize refreshes across processes
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None  # type: ignore[assignment]
 
 
 class MDRApiError(RuntimeError):
@@ -54,6 +60,50 @@ def _fmt_ts(ts: Optional[int]) -> str:
     if not ts:
         return "unknown"
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+
+
+class _InterProcessLock:
+    """Best-effort ``flock`` based mutex around the token file.
+
+    Token rotation is destructive: every successful ``session/confirm``
+    invalidates the previous refresh token. Two processes (the service and a
+    manual ``--once`` run, or two hosts sharing a mounted state dir) must not
+    refresh concurrently, otherwise one of them gets ``409 Already changed``
+    and the new pair is never persisted.
+    """
+
+    def __init__(self, path: Path, timeout: float = 60.0) -> None:
+        self.path = path
+        self.timeout = timeout
+        self._fh = None
+
+    def __enter__(self) -> "_InterProcessLock":
+        if fcntl is None:
+            return self
+        deadline = time.monotonic() + self.timeout
+        self._fh = open(self.path, "a+")
+        while True:
+            try:
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise MDRTokenError(
+                        f"cannot acquire token lock {self.path} within {self.timeout}s"
+                    ) from exc
+                time.sleep(0.1)
+
+    def __exit__(self, *_exc: Any) -> None:
+        if self._fh is None:
+            return
+        try:
+            if fcntl is not None:
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._fh.close()
+            self._fh = None
 
 
 class MDRTokenStore:
@@ -91,6 +141,9 @@ class MDRTokenStore:
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
         self._seed_refresh_token = refresh_token.strip()
+        self._lock_path = Path(str(self.path) + ".lock")
+        self._file_mtime: Optional[float] = None
+        self._dirty = False
         self._load()
 
     # ------------------------------------------------------------- storage
@@ -100,6 +153,7 @@ class MDRTokenStore:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 self._access_token = data.get("access_token") or None
                 self._refresh_token = data.get("refresh_token") or None
+                self._file_mtime = self.path.stat().st_mtime
             except Exception:  # noqa: BLE001
                 self.log.exception("cannot read token file %s; ignoring it", self.path)
 
@@ -136,19 +190,73 @@ class MDRTokenStore:
         else:
             self.log.error("MDR refresh token is not configured")
 
-    def _save(self) -> None:
+    def _reload_from_disk(self) -> None:
+        """Pick up a token pair rotated by another process.
+
+        Called while the inter-process lock is held, so the file cannot change
+        between the read and the following refresh call.
+        """
+        try:
+            st = self.path.stat()
+        except OSError:
+            return
+        if self._file_mtime is not None and st.st_mtime == self._file_mtime:
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            self.log.warning("cannot re-read token file %s", self.path)
+            return
+
+        file_refresh = data.get("refresh_token") or None
+        file_access = data.get("access_token") or None
+        if file_refresh and file_refresh != self._refresh_token:
+            self.log.info("token file was rotated by another process; reloading it")
+            self._refresh_token = file_refresh
+            self._access_token = file_access
+        self._file_mtime = st.st_mtime
+
+    def _save(self) -> bool:
+        """Atomically persist the pair; returns False if the write failed.
+
+        The write is fsynced before the pair is handed back to callers, so a
+        crash right after a successful ``session/confirm`` cannot lose the new
+        refresh token (the old one is already invalid on the MDR side).
+        """
         payload = {
             "access_token": self._access_token,
             "refresh_token": self._refresh_token,
             "updated_at": int(time.time()),
         }
         tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-        os.replace(tmp, self.path)
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+            os.replace(tmp, self.path)
+            try:
+                dir_fd = os.open(str(self.path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
+            try:
+                self._file_mtime = self.path.stat().st_mtime
+            except OSError:
+                pass
+            self._dirty = False
+            return True
+        except Exception:  # noqa: BLE001
+            self.log.exception("cannot persist tokens to %s", self.path)
+            self._dirty = True
+            return False
 
     # ------------------------------------------------------------- tokens
     def stop(self) -> None:
@@ -164,6 +272,8 @@ class MDRTokenStore:
 
     def access_token(self, max_attempts: int = 3) -> str:
         with self._lock:
+            if self._dirty:
+                self._save()
             if self._access_is_valid():
                 return self._access_token  # type: ignore[return-value]
             return self._refresh_locked(max_attempts=max_attempts)
@@ -172,60 +282,137 @@ class MDRTokenStore:
         with self._lock:
             return self._refresh_locked(max_attempts=max_attempts)
 
-    def _refresh_locked(self, max_attempts: int) -> str:
+    def refresh_after_auth_error(self, failed_access_token: Optional[str]) -> str:
+        """Refresh only if the rejected token is still the current one.
+
+        A 401/403 usually means the access token expired, and several threads
+        (or the keeper and the sync loop) can hit it at the same time. If a
+        concurrent refresh already produced a new pair, reusing it is correct;
+        rotating again would invalidate the pair the other caller just saved
+        and produce ``409 Already changed``.
+        """
+        with self._lock:
+            if self._dirty:
+                self._save()
+            if (
+                failed_access_token
+                and self._access_token
+                and self._access_token != failed_access_token
+                and self._access_is_valid()
+            ):
+                self.log.info("access token was already refreshed; reusing it")
+                return self._access_token
+            return self._refresh_locked(
+                max_attempts=3, failed_token=failed_access_token
+            )
+
+    def _refresh_locked(
+        self, max_attempts: int, failed_token: Optional[str] = None
+    ) -> str:
         """Refresh the token pair.
 
         ``max_attempts=0`` means retry forever with exponential backoff. That
         mode is used by the background keeper, so the refresh procedure is
         automatically restarted after any error.
+
+        The network call runs under an inter-process lock and the new pair is
+        fsynced to disk before it is returned. Both steps are required: the
+        old refresh token is invalidated by ``session/confirm`` even if the
+        process dies before persisting the new one.
         """
         attempt = 0
         delay = self.retry_delay_seconds
+        ipc_lock = _InterProcessLock(self._lock_path)
 
         while not self._stop.is_set():
             attempt += 1
-            refresh_token = self._refresh_token or self._seed_refresh_token
-            if not refresh_token:
-                raise MDRTokenError(
-                    "refresh_token is empty; generate a new token in "
-                    "MDR Web Console -> Settings -> API"
-                )
             try:
-                url = f"{self.api_url}/{self.client_id}/session/confirm"
-                response = requests.post(
-                    url,
-                    json={"refresh_token": refresh_token},
-                    verify=self.verify,
-                    timeout=self.timeout,
-                    proxies=self.proxies,
-                )
-                if response.status_code != 200:
-                    raise MDRTokenError(
-                        f"session/confirm HTTP {response.status_code}: {response.text[:500]}",
-                        status_code=response.status_code,
-                        body=response.text,
-                    )
-                data = response.json()
-                access_token = data.get("access_token")
-                new_refresh_token = data.get("refresh_token")
-                if not access_token or not new_refresh_token:
-                    raise MDRTokenError(
-                        "session/confirm response does not contain access_token "
-                        "and refresh_token"
+                with ipc_lock:
+                    self._reload_from_disk()
+                    if (
+                        failed_token
+                        and self._access_token
+                        and self._access_token != failed_token
+                        and self._access_is_valid()
+                    ):
+                        self.log.info("another process already refreshed the token")
+                        return self._access_token
+
+                    refresh_token = self._refresh_token or self._seed_refresh_token
+                    if not refresh_token:
+                        raise MDRTokenError(
+                            "refresh_token is empty; generate a new token in "
+                            "MDR Web Console -> Settings -> API"
+                        )
+
+                    url = f"{self.api_url}/{self.client_id}/session/confirm"
+                    response = requests.post(
+                        url,
+                        json={"refresh_token": refresh_token},
+                        verify=self.verify,
+                        timeout=self.timeout,
+                        proxies=self.proxies,
                     )
 
-                self._access_token = access_token
-                self._refresh_token = new_refresh_token
-                self._save()
+                    if response.status_code == 409:
+                        # Someone else rotated the token between our read and
+                        # this call. If their pair is on disk we can just use
+                        # it; otherwise both tokens are dead and only a new
+                        # manually generated token helps.
+                        self._reload_from_disk()
+                        if (
+                            self._access_token
+                            and self._access_is_valid()
+                            and self._refresh_token != refresh_token
+                        ):
+                            self.log.warning(
+                                "session/confirm returned 409 but a newer token "
+                                "pair is on disk; using it"
+                            )
+                            return self._access_token
+                        raise MDRTokenError(
+                            "session/confirm HTTP 409: refresh token already used "
+                            "by another session; generate a new token in MDR Web "
+                            "Console -> Settings -> API",
+                            status_code=409,
+                            body=response.text,
+                        )
 
-                self.log.info(
-                    "MDR tokens refreshed; access expires %s, refresh expires %s",
-                    _fmt_ts(jwt_exp(access_token)),
-                    _fmt_ts(jwt_exp(new_refresh_token)),
-                )
-                return access_token
+                    if response.status_code != 200:
+                        raise MDRTokenError(
+                            f"session/confirm HTTP {response.status_code}: {response.text[:500]}",
+                            status_code=response.status_code,
+                            body=response.text,
+                        )
+                    data = response.json()
+                    access_token = data.get("access_token")
+                    new_refresh_token = data.get("refresh_token")
+                    if not access_token or not new_refresh_token:
+                        raise MDRTokenError(
+                            "session/confirm response does not contain access_token "
+                            "and refresh_token"
+                        )
+
+                    self._access_token = access_token
+                    self._refresh_token = new_refresh_token
+                    # Save before handing the pair to the caller: the previous
+                    # refresh token is already invalid on the MDR side.
+                    if not self._save():
+                        self.log.critical(
+                            "new MDR token pair is not persisted; keeping it in "
+                            "memory and retrying the write"
+                        )
+
+                    self.log.info(
+                        "MDR tokens refreshed; access expires %s, refresh expires %s",
+                        _fmt_ts(jwt_exp(access_token)),
+                        _fmt_ts(jwt_exp(new_refresh_token)),
+                    )
+                    return access_token
 
             except Exception as exc:  # noqa: BLE001 - retry any failure
+                if isinstance(exc, MDRTokenError) and exc.status_code == 409:
+                    raise
                 if max_attempts and attempt >= max_attempts:
                     raise MDRTokenError(
                         f"token refresh failed after {attempt} attempt(s): {exc}"
@@ -342,7 +529,7 @@ class MDRClient:
                     response.status_code,
                 )
                 try:
-                    self.tokens.force_refresh(max_attempts=3)
+                    self.tokens.refresh_after_auth_error(token)
                     continue
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
