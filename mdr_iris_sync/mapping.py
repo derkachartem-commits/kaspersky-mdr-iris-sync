@@ -412,7 +412,7 @@ def build_escalation_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> D
     tags = ",".join(
         tag.replace(",", " ") for tag in mapping_cfg.get("tags", ["MDR", "Kaspersky"])
     )
-    return {
+    payload = {
         "case_title": truncate(f"{mapping_cfg.get('title_prefix', '[MDR]')} #{incident_number} {summary}", 190),
         "case_tags": tags,
         "note": (
@@ -423,6 +423,10 @@ def build_escalation_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> D
         "iocs_import_list": [],
         "assets_import_list": [],
     }
+    template_id = mapping_cfg.get("case_template_id")
+    if template_id:
+        payload["case_template_id"] = int(template_id)
+    return payload
 
 
 def build_merge_payload(incident: Dict[str, Any], target_case_id: int) -> Dict[str, Any]:
