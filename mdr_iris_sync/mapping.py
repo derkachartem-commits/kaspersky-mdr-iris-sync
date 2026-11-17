@@ -400,6 +400,71 @@ def build_alert_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
     return payload
 
 
+DEFAULT_CASE_TEMPLATE_RULES = [
+    {
+        "template_id": 4,
+        "mitre": ["t1486", "t1490", "t1489"],
+        "keywords": ["ransom", "вымог", "шифр", "encrypted", "lockbit", "conti", "phobos"],
+    },
+    {
+        "template_id": 5,
+        "mitre": ["t1003", "t1555", "t1552", "t1550"],
+        "keywords": ["lsass", "mimikatz", "kerberoast", "credential", "дамп памяти", "hashdump"],
+    },
+    {
+        "template_id": 9,
+        "mitre": ["t1041", "t1048", "t1567", "t1020"],
+        "keywords": ["exfil", "утечк", "выгруз", "отправка данных"],
+    },
+    {
+        "template_id": 8,
+        "mitre": ["t1021", "t1570", "t1210"],
+        "keywords": ["lateral", "psexec", "wmic", "rdp", "перемещен"],
+    },
+    {
+        "template_id": 7,
+        "mitre": ["t1566"],
+        "keywords": ["фишинг", "phishing", "подозрительное письмо", "вложение", "ссылк"],
+    },
+    {
+        "template_id": 6,
+        "mitre": [
+            "t1059", "t1105", "t1547", "t1543", "t1053",
+            "t1218", "t1112", "t1569", "t1548",
+        ],
+        "keywords": [
+            "trojan", "backdoor", "malware", "вредонос",
+            "regsvr32", "rundll32", "powershell", "скрипт",
+        ],
+    },
+]
+
+
+def select_case_template(incident: Dict[str, Any], mapping_cfg: Dict[str, Any]) -> Optional[int]:
+    """Pick a case template by MITRE technique or keyword, fallback to the default."""
+    text = " ".join(
+        str(incident.get(key) or "")
+        for key in ("summary", "description", "status_description", "attack_stage")
+    ).lower()
+    techniques = " ".join(
+        str(item) for item in (incident.get("mitre_techniques") or [])
+    ).lower()
+    tactics = " ".join(
+        str(item) for item in (incident.get("mitre_tactics") or [])
+    ).lower()
+    haystack = f"{text} {tactics}"
+
+    rules = mapping_cfg.get("case_template_rules") or DEFAULT_CASE_TEMPLATE_RULES
+    for rule in rules:
+        if any(str(t).lower() in techniques for t in rule.get("mitre") or []):
+            return int(rule["template_id"])
+        if any(str(k).lower() in haystack for k in rule.get("keywords") or []):
+            return int(rule["template_id"])
+
+    fallback = mapping_cfg.get("case_template_id")
+    return int(fallback) if fallback else None
+
+
 def build_escalation_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     mapping_cfg = cfg["mapping"]
     incident_id = str(incident.get("incident_id") or "")
@@ -423,7 +488,7 @@ def build_escalation_payload(incident: Dict[str, Any], cfg: Dict[str, Any]) -> D
         "iocs_import_list": [],
         "assets_import_list": [],
     }
-    template_id = mapping_cfg.get("case_template_id")
+    template_id = select_case_template(incident, mapping_cfg)
     if template_id:
         payload["case_template_id"] = int(template_id)
     return payload
