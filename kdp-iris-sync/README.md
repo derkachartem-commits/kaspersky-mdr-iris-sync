@@ -51,6 +51,14 @@
 - `iris.alert_status_new` / `alert_status_closed` — id статусов в конкретной инсталляции IRIS.
 - `thresholds` — границы severity для атак (bps) и аномалий (процент превышения).
 
+## Обновление на стенде (Docker на хосте, без VM)
+
+```bash
+sudo ./scripts/update-stand.sh
+```
+
+Скрипт: забирает код из GitHub (`main`), делает бэкап `config.json` и `state/`, собирает образ, пересоздаёт контейнер `kdp-iris-sync` (`--network host`, `-v /opt/kdp-iris-sync:/app`) и проверяет `/healthz`. Конфиг с кредами/токеном и state не перезаписывает. Переопределяется через env: `REPO_BRANCH`, `REPO_URL`, `APP_DIR`, `IMAGE`, `CONTAINER`, `HEALTH_URL`.
+
 ## Запуск
 
 ```bash
