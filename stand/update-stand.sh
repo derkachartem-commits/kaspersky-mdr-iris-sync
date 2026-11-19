@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-# KDP -> IRIS connector: update on a stand where Docker runs on the host
-# (no VM). Pulls the code from GitHub, rebuilds the image, recreates the
-# container and verifies /healthz. Config (with credentials/token), state
-# and logs inside APP_DIR are preserved.
+# Full stand update: pull everything from GitHub and refresh BOTH pieces
+# running on the host's Docker:
+#   1) the KDP -> IRIS connector (container kdp-iris-sync)
+#   2) the IRIS patches (iris-backend:tasks-fix, static client, nginx, config)
+#
+# Configs, state, logs and credentials stay untouched (KDP config.json is
+# backed up before the update; IRIS compose override is backed up too).
 #
 # Usage:
 #   sudo ./update-stand.sh
-#   REPO_BRANCH=dev APP_DIR=/opt/kdp-iris-sync sudo -E ./update-stand.sh
+#   SKIP_IRIS=1 sudo ./update-stand.sh          # only the KDP connector
+#   REPO_BRANCH=dev sudo -E ./update-stand.sh
 #
-# Env overrides:
-#   REPO_URL     git remote (default: public repo below)
-#   REPO_BRANCH  default: main
-#   SRC_SUBDIR   connector path inside the repo (default: kdp-iris-sync)
-#   APP_DIR      deployed dir with config.json/state (default: /opt/kdp-iris-sync)
-#   SRC_DIR      checkout dir (default: /opt/kdp-iris-sync-src)
-#   IMAGE        image tag (default: kdp-iris-sync:latest)
-#   CONTAINER    container name (default: kdp-iris-sync)
-#   HEALTH_URL   default: http://127.0.0.1:8088/healthz
+# Env:
+#   REPO_URL, REPO_BRANCH, SRC_SUBDIR, APP_DIR, SRC_DIR, IMAGE, CONTAINER,
+#   HEALTH_URL, BACKUP_DIR, IRIS_DIR (/opt/iris3), SKIP_IRIS=1
 
 set -euo pipefail
 
@@ -29,9 +27,11 @@ IMAGE="${IMAGE:-kdp-iris-sync:latest}"
 CONTAINER="${CONTAINER:-kdp-iris-sync}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8088/healthz}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/kdp-iris-sync-backups}"
+IRIS_DIR="${IRIS_DIR:-/opt/iris3}"
+SKIP_IRIS="${SKIP_IRIS:-0}"
 
-log()  { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
-die()  { log "ERROR: $*" >&2; exit 1; }
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+die() { log "ERROR: $*" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || die "docker not found"
 command -v git    >/dev/null 2>&1 || die "git not found (apt-get install -y git)"
@@ -52,7 +52,7 @@ SRC="$SRC_DIR/$SRC_SUBDIR"
 REV="$(git -C "$SRC_DIR" rev-parse --short HEAD)"
 log "code revision: $REV"
 
-# --- 2. backup config/state -------------------------------------------------
+# --- 2. backup KDP config/state --------------------------------------------
 mkdir -p "$APP_DIR" "$BACKUP_DIR"
 TS="$(date '+%Y%m%d-%H%M%S')"
 if [ -f "$APP_DIR/config.json" ]; then
@@ -62,11 +62,11 @@ if [ -f "$APP_DIR/config.json" ]; then
   log "backup: $BACKUP_DIR/$TS"
 fi
 
-# --- 3. build image (before touching the running container) ----------------
+# --- 3. build connector image (old container keeps running on failure) ------
 log "building $IMAGE from $SRC"
 docker build -q -t "$IMAGE" "$SRC" >/dev/null
 
-# --- 4. swap container ------------------------------------------------------
+# --- 4. swap connector container -------------------------------------------
 if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   log "recreating container $CONTAINER"
   docker stop "$CONTAINER" >/dev/null
@@ -90,16 +90,27 @@ log "starting $CONTAINER"
 docker run -d --name "$CONTAINER" --restart always --network host \
   -v "$APP_DIR:/app" -w /app -e KDP_CONFIG=config.json "$IMAGE" >/dev/null
 
-# --- 5. health check --------------------------------------------------------
+# --- 5. connector health check ---------------------------------------------
 for _ in $(seq 1 30); do
   if curl -fsS --max-time 3 "$HEALTH_URL" -o /tmp/kdp-health.json 2>/dev/null; then
-    log "healthz OK: $(cat /tmp/kdp-health.json)"
-    log "done, revision $REV"
-    exit 0
+    log "kdp healthz OK: $(cat /tmp/kdp-health.json)"
+    break
   fi
   sleep 2
 done
+if [ ! -s /tmp/kdp-health.json ]; then
+  docker logs --tail 40 "$CONTAINER" 2>&1 || true
+  die "KDP connector did not become healthy (backup: $BACKUP_DIR/$TS)"
+fi
 
-log "healthz is not responding, last log lines:"
-docker logs --tail 40 "$CONTAINER" 2>&1 || true
-die "update finished with errors (backup: $BACKUP_DIR/$TS)"
+# --- 6. IRIS patches --------------------------------------------------------
+if [ "$SKIP_IRIS" = "1" ]; then
+  log "SKIP_IRIS=1 - IRIS update skipped"
+elif [ -d "$IRIS_DIR" ]; then
+  log "updating IRIS patches in $IRIS_DIR"
+  IRIS_DIR="$IRIS_DIR" PATCH_DIR="$SRC_DIR/stand/iris-patch" bash "$SRC_DIR/stand/update-iris.sh"
+else
+  log "IRIS not found in $IRIS_DIR - skipped"
+fi
+
+log "done, revision $REV"

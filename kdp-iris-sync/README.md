@@ -53,11 +53,14 @@
 
 ## Обновление на стенде (Docker на хосте, без VM)
 
+Полное обновление стенда (коннектор + патчи IRIS) — `stand/update-stand.sh`:
+
 ```bash
-sudo ./scripts/update-stand.sh
+curl -fsSL https://raw.githubusercontent.com/derkachartem-commits/kaspersky-mdr-iris-sync/main/stand/update-stand.sh -o /root/update-stand.sh
+sudo bash /root/update-stand.sh
 ```
 
-Скрипт: забирает код из GitHub (`main`), делает бэкап `config.json` и `state/`, собирает образ, пересоздаёт контейнер `kdp-iris-sync` (`--network host`, `-v /opt/kdp-iris-sync:/app`) и проверяет `/healthz`. Конфиг с кредами/токеном и state не перезаписывает. Переопределяется через env: `REPO_BRANCH`, `REPO_URL`, `APP_DIR`, `IMAGE`, `CONTAINER`, `HEALTH_URL`.
+Только коннектор: `SKIP_IRIS=1 sudo bash /root/update-stand.sh`. Подробности — `stand/README.md`.
 
 ## Запуск
 
