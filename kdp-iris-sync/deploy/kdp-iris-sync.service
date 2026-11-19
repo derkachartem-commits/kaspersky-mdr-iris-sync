@@ -1,0 +1,18 @@
+[Unit]
+Description=KDP (Kaspersky DDoS Protection) to DFIR-IRIS connector
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/kdp-iris-sync
+Environment=KDP_CONFIG=config.json
+ExecStart=/opt/kdp-iris-sync/.venv/bin/uvicorn kdp_iris_sync.app:app --host 127.0.0.1 --port 8088
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

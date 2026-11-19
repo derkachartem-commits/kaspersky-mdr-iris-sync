@@ -1,0 +1,52 @@
+version: '1'
+iris:
+  api_url: "https://127.0.0.1:8446"
+  api_key: "CHANGE_ME"
+  verify: false
+  customer_id: 1
+  alert_status_new: 1
+  alert_status_closed: 2
+  severity_ids:
+    low: 4
+    medium: 1
+    high: 5
+    critical: 6
+listen:
+  host: "127.0.0.1"
+  port: 8088
+kdp:
+  enabled: false
+  api_url: "https://<kdp-api-host>/api/v1"
+  attacks_path: "/attacks"
+  anomalies_path: "/anomalies"
+  attacks_method: "GET"          # кабинет KDP: POST /api/attacks/ с телом {}
+  anomalies_method: "GET"
+  token: "<api-token>"
+  auth_header: "Authorization"
+  auth_scheme: "Bearer"
+  verify: true
+  timeout: 30
+  poll_interval_seconds: 60
+  close_missing: true
+  close_grace_seconds: 90
+  # --- авто-обновление сессионного токена кабинета (portal.kdp.global) ---
+  portal_url: "https://portal.kdp.global"
+  signin_path: "/api/auth/signin/"
+  login_type: 1                  # 1 = email, 2 = phone, 3 = telegram
+  locale_id: 10
+  login: ""                      # НЕ коммитить; лучше env KDP_LOGIN
+  password: ""                   # НЕ коммитить; лучше env KDP_PASSWORD
+  refresh_token: true
+  token_refresh_hours: 12
+auto_close:
+  enabled: true
+  only_if_status_new: true
+  escalation: "manual"
+thresholds:
+  attack_critical_bps: 5000000000
+  attack_high_bps: 1000000000
+  anomaly_medium_excess_percent: 50
+state_db: "state/kdp.db"
+log:
+  file: "logs/kdp.log"
+  level: "INFO"
