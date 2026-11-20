@@ -107,6 +107,20 @@ def _context_lines(payload: Dict[str, Any]) -> list[str]:
     return lines
 
 
+def kdp_reference(payload: Dict[str, Any], kind: str, external_id: str) -> str:
+    """Human reference to the KDP entity: the ID shown in the KDP cabinet."""
+    if kind == "anomaly":
+        anomaly_group_id = payload.get("resource_id") or external_id
+        return f"KDP: аномалия ID {anomaly_group_id}"
+    if kind == "attack":
+        return f"KDP: атака ID {external_id}"
+    if kind == "bgp":
+        return f"KDP: BGP peer {payload.get('peer_ip')}"
+    if kind == "certificate":
+        return f"KDP: сертификат {payload.get('kdp_resource')}"
+    return f"KDP: событие {external_id}"
+
+
 def _kdp_link(payload: Dict[str, Any], config: Dict[str, Any], kind: str, external_id: str) -> str:
     """Deep link to the event in the KDP cabinet (portal.kdp.global)."""
     portal = str((config.get("kdp") or {}).get("portal_url") or "https://portal.kdp.global").rstrip("/")
@@ -162,8 +176,8 @@ def build_alert(
         "alert_title": title[:200],
         "alert_description": (
             "\n".join(_context_lines(payload))
-            + "\nKDP: "
-            + _kdp_link(payload, config, kind, external_id)
+            + "\n"
+            + kdp_reference(payload, kind, external_id)
         )[:4000],
         "alert_source": SOURCE_NAME,
         "alert_source_ref": event_key,
@@ -217,8 +231,7 @@ def build_case_payload(
     start = str(payload.get("start_time") or payload.get("timestamp") or "")
     description = (
         "Автоматически создан из алерта KDP "
-        f"(`{kind}:{external_id}`). Ссылка в KDP: "
-        f"{_kdp_link(payload, config, kind, external_id)}"
+        f"(`{kind}:{external_id}`). {kdp_reference(payload, kind, external_id)}"
     )
     if start:
         description += f" Начало: {start}."
