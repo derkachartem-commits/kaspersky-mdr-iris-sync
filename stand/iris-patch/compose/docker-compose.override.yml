@@ -1,4 +1,4 @@
-services:
+﻿services:
   app:
     image: iris-backend:tasks-fix
     volumes:
@@ -8,4 +8,3 @@ services:
   nginx:
     volumes:
       - ./patches/ctx.js:/www/data/ctx.js:ro
-      - ./client.new:/www/client:ro
