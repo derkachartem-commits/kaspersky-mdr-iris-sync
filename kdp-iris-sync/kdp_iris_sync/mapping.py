@@ -214,13 +214,18 @@ def build_case_payload(
         title = f"[KDP] {kind} — {resource}"
         template_id = auto.get("default_template_id")
 
+    start = str(payload.get("start_time") or payload.get("timestamp") or "")
+    description = (
+        "Автоматически создан из алерта KDP "
+        f"(`{kind}:{external_id}`). Ссылка в KDP: "
+        f"{_kdp_link(payload, config, kind, external_id)}"
+    )
+    if start:
+        description += f" Начало: {start}."
+
     body: Dict[str, Any] = {
         "case_title": title[:190],
-        "case_description": (
-            "Автоматически создан из алерта KDP "
-            f"(`{kind}:{external_id}`). Ссылка в KDP: "
-            f"{_kdp_link(payload, config, kind, external_id)}"
-        ),
+        "case_description": description,
         "case_soc_id": f"KDP-{external_id}",
         "case_customer_id": int(iris_cfg.get("customer_id", 1)),
         "case_tags": f"kdp,{kind}",
@@ -228,6 +233,18 @@ def build_case_payload(
     if template_id:
         body["case_template_id"] = int(template_id)
     return body
+
+
+def case_dates(payload: Dict[str, Any]) -> Dict[str, str]:
+    """IRIS case date fields (YYYY-MM-DD) from the event timestamps."""
+    out: Dict[str, str] = {}
+    start = str(payload.get("start_time") or payload.get("timestamp") or "")
+    end = str(payload.get("end_time") or "")
+    if len(start) >= 10:
+        out["open_date"] = start[:10]
+    if len(end) >= 10:
+        out["close_date"] = end[:10]
+    return out
 
 
 def status_id_for(payload: Dict[str, Any], config: Dict[str, Any]) -> Optional[int]:
