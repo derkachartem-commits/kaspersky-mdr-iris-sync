@@ -143,6 +143,43 @@ class IrisClient:
         data = self._data(raw)
         return data if isinstance(data, dict) else {}
 
+    def _case_note_directory(self, case_id: int) -> Optional[int]:
+        """Return (or create) the KDP notes directory of a case."""
+        raw = self._request("GET", f"/api/v2/cases/{int(case_id)}/notes-directories")
+        data = self._data(raw)
+        items = data if isinstance(data, list) else (data or {}).get("data") or []
+        for item in items:
+            if isinstance(item, dict) and item.get("id"):
+                return int(item["id"])
+        created = self._request(
+            "POST",
+            f"/api/v2/cases/{int(case_id)}/notes-directories",
+            json_body={"name": "KDP"},
+            expected=(200, 201),
+        )
+        created = self._data(created)
+        if isinstance(created, dict) and created.get("id"):
+            return int(created["id"])
+        return None
+
+    def add_case_note(self, case_id: int, title: str, text: str) -> Dict[str, Any]:
+        """Add a note (the case "comment" in IRIS v3) to a case."""
+        directory_id = self._case_note_directory(case_id)
+        if not directory_id:
+            raise IrisApiError(f"cannot resolve notes directory for case {case_id}")
+        raw = self._request(
+            "POST",
+            f"/api/v2/cases/{int(case_id)}/notes",
+            json_body={
+                "note_title": title[:150],
+                "note_content": text,
+                "directory_id": directory_id,
+            },
+            expected=(200, 201),
+        )
+        data = self._data(raw)
+        return data if isinstance(data, dict) else {}
+
     def append_case_description(self, case_id: int, text: str) -> Dict[str, Any]:
         """Append a line to the case description.
 
