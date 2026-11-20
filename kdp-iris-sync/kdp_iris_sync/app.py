@@ -192,6 +192,12 @@ def _maybe_escalate(
                 IRIS.update_case(int(case_id), {"open_date": dates["open_date"]})
             except Exception as exc:  # noqa: BLE001
                 LOG.warning("cannot set open_date on case %s: %s", case_id, exc)
+        start = str(payload.get("start_time") or payload.get("timestamp") or "")
+        if start:
+            try:
+                IRIS.append_case_description(int(case_id), f"Начало: {start}")
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("cannot append start time to case %s: %s", case_id, exc)
         LOG.info("alert %s escalated to case %s", alert_id, case_id)
         return int(case_id)
     except Exception as exc:  # noqa: BLE001 - escalation must not drop the alert
