@@ -45,6 +45,9 @@ auto_close:
   enabled: true
   only_if_status_new: true
   escalation: "manual"
+  # закрывать кейс вместе с последней аномалией группы
+  close_case: true
+  case_closed_state_id: 9
 thresholds:
   attack_critical_bps: 5000000000
   attack_high_bps: 1000000000
