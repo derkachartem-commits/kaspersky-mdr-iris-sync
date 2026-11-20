@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
@@ -151,7 +151,29 @@ class KdpPuller(threading.Thread):
         scheme = str(self.cfg.get("auth_scheme") or "Bearer").strip()
         return {header: f"{scheme} {token}".strip(), "Accept": "application/json"}
 
-    def _get(self, url: Optional[str], method: str = "GET") -> List[Dict[str, Any]]:
+    def _query_params(self) -> Optional[Dict[str, Any]]:
+        """Query window for the anomalies feed (the cabinet hides inactive ones)."""
+        state = str(self.cfg.get("anomalies_state") or "").strip()
+        if not state:
+            return None
+        hours = max(1, int(self.cfg.get("anomalies_window_hours", 24)))
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=hours)
+        fmt = "%Y-%m-%dT%H:%M:%S.000Z"
+        return {
+            "locale_id": int(self.cfg.get("locale_id", 10)),
+            "anomaly_state": state,
+            "color": "all",
+            "start": start.strftime(fmt),
+            "end": end.strftime(fmt),
+        }
+
+    def _get(
+        self,
+        url: Optional[str],
+        method: str = "GET",
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         if not url:
             return []
         kwargs: Dict[str, Any] = {
@@ -164,7 +186,7 @@ class KdpPuller(threading.Thread):
             kwargs["proxies"] = {"http": self.cfg["proxy"], "https": self.cfg["proxy"]}
         method = (method or "GET").upper()
         if method == "GET":
-            response = self.session.get(url, **kwargs)
+            response = self.session.get(url, params=params, **kwargs)
         else:
             response = self.session.request(method, url, json={}, **kwargs)
         if response.status_code in (401, 403) and self.on_auth_error:
@@ -208,7 +230,11 @@ class KdpPuller(threading.Thread):
             polled.append(("attack", active))
 
         if anomalies_url:
-            items = self._get(anomalies_url, self.cfg.get("anomalies_method", "GET"))
+            items = self._get(
+                anomalies_url,
+                self.cfg.get("anomalies_method", "GET"),
+                self._query_params(),
+            )
             active = {}
             for item in items:
                 payload = anomaly_payload(item)
