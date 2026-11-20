@@ -157,8 +157,9 @@ def build_alert(
             f"({payload.get('attack_type')})"
         )
     elif kind == "anomaly":
+        anomaly_id = payload.get("resource_id") or external_id
         title = (
-            f"[KDP] Аномалия — {payload.get('resource_name')} "
+            f"[KDP] Аномалия #{anomaly_id} — {payload.get('resource_name')} "
             f"({payload.get('check_name')})"
         )
     elif kind == "bgp":
@@ -222,7 +223,8 @@ def build_case_payload(
         title = f"[KDP] Атака — {resource} ({payload.get('attack_type')})"
         template_id = auto.get("attack_template_id")
     elif kind == "anomaly":
-        title = f"[KDP] Аномалия — {resource} ({payload.get('check_name')})"
+        anomaly_id = payload.get("resource_id") or external_id
+        title = f"[KDP] Аномалия #{anomaly_id} — {resource} ({payload.get('check_name')})"
         template_id = auto.get("anomaly_template_id")
     else:
         title = f"[KDP] {kind} — {resource}"

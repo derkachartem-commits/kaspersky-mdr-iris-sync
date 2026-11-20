@@ -85,7 +85,9 @@ def anomaly_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "resource_name": _pick(item, "resource_name", "resource", "target", "host"),
         "group_id": _pick(item, "group_id"),
         "group_name": _pick(item, "group_name"),
-        "check_name": _pick(item, "check_name", "metric", "name", default="metric"),
+        "check_name": _pick(
+            item, "check_short_name", "check_name", "metric", "name", default="metric"
+        ),
         "check_measurement": _pick(item, "check_measurement", "unit", default=""),
         "max_value": _pick(item, "max_value", "value", default=0),
         "threshold": _pick(item, "threshold", default=0),
