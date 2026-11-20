@@ -7,6 +7,27 @@ from typing import Any, Dict, Optional, Tuple
 
 SOURCE_NAME = "Kaspersky KDP"
 
+# KDP returns metric names in the cabinet language; the IRIS titles stay English.
+DEFAULT_METRIC_NAMES = {
+    "Входящий трафик в битах": "Incoming traffic in bps",
+    "Входящий трафик в пакетах": "Incoming traffic in pps",
+    "Исходящий трафик в битах": "Outgoing traffic in bps",
+    "Исходящий трафик в пакетах": "Outgoing traffic in pps",
+    "Входящий UDP-трафик": "Incoming UDP traffic",
+    "Исходящий UDP-трафик": "Outgoing UDP traffic",
+    "SYN-пакеты": "SYN packets",
+    "DNS-пакеты": "DNS packets",
+    "ICMP-пакеты": "ICMP packets",
+    "TCP-пакеты": "TCP packets",
+}
+
+
+def display_check_name(name: Any, config: Dict[str, Any]) -> str:
+    raw = str(name or "metric")
+    mapping = dict(DEFAULT_METRIC_NAMES)
+    mapping.update((config.get("kdp") or {}).get("metric_names") or {})
+    return mapping.get(raw, raw)
+
 OPENING_TYPES = {"attack_start", "anomaly_start", "bgp_down", "ssl_certificate_expires"}
 CLOSING_TYPES = {"attack_stop", "attack_short_term", "anomaly_stop"}
 
@@ -160,7 +181,7 @@ def build_alert(
         anomaly_id = payload.get("resource_id") or external_id
         title = (
             f"[KDP] Аномалия #{anomaly_id} — {payload.get('resource_name')} "
-            f"({payload.get('check_name')})"
+            f"({display_check_name(payload.get('check_name'), config)})"
         )
     elif kind == "bgp":
         title = f"[KDP] BGP down — {payload.get('peer_ip')}"
@@ -224,7 +245,10 @@ def build_case_payload(
         template_id = auto.get("attack_template_id")
     elif kind == "anomaly":
         anomaly_id = payload.get("resource_id") or external_id
-        title = f"[KDP] Аномалия #{anomaly_id} — {resource} ({payload.get('check_name')})"
+        title = (
+            f"[KDP] Аномалия #{anomaly_id} — {resource} "
+            f"({display_check_name(payload.get('check_name'), config)})"
+        )
         template_id = auto.get("anomaly_template_id")
     else:
         title = f"[KDP] {kind} — {resource}"

@@ -163,7 +163,7 @@ class KdpPuller(threading.Thread):
         start = end - timedelta(hours=hours)
         fmt = "%Y-%m-%dT%H:%M:%S.000Z"
         return {
-            "locale_id": int(self.cfg.get("locale_id", 10)),
+            "locale_id": int(self.cfg.get("anomalies_locale_id", 1)),
             "anomaly_state": state,
             "color": "all",
             "start": start.strftime(fmt),
