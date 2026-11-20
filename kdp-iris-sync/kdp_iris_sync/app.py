@@ -265,6 +265,13 @@ def _close_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str)
             IRIS.update_case(case_id, case_dates({"end_time": end_time}))
         except Exception as exc:  # noqa: BLE001
             LOG.warning("cannot set close date on case %s: %s", case_id, exc)
+        if (CONFIG.get("auto_close") or {}).get("close_case", True):
+            closed_state = int((CONFIG.get("auto_close") or {}).get("case_closed_state_id", 9))
+            try:
+                IRIS.update_case_state(case_id, closed_state)
+                LOG.info("case %s closed (state=%s)", case_id, closed_state)
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("cannot close case %s: %s", case_id, exc)
 
     resource_key = str(payload.get("resource_name") or payload.get("kdp_resource") or "")
     if resource_key:
