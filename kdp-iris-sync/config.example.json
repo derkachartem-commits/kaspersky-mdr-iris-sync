@@ -21,6 +21,10 @@ kdp:
   anomalies_path: "/anomalies"
   attacks_method: "GET"          # кабинет KDP: POST /api/attacks/ с телом {}
   anomalies_method: "GET"
+  # кабинет отдаёт по умолчанию только активные (ongoing); recent = за окно
+  anomalies_state: "recent"
+  anomalies_window_hours: 24
+  locale_id: 10
   token: "<api-token>"
   auth_header: "Authorization"
   auth_scheme: "Bearer"
