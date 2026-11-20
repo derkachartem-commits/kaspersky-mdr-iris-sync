@@ -27,6 +27,7 @@ from .mapping import (
     build_case_payload,
     case_dates,
     close_comment,
+    kdp_reference,
     event_identity,
     severity_for,
     status_id_for,
@@ -159,6 +160,10 @@ def _create_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str
         raise IrisApiError(f"IRIS не вернул alert_id: {data!r}")
     STATE.set_alert_id(key, alert_id)
     LOG.info("alert created: kdp=%s iris_alert=%s", key, alert_id)
+    try:
+        IRIS.add_comment("alerts", alert_id, kdp_reference(payload, kind, external_id))
+    except Exception as exc:  # noqa: BLE001 - comment is informational
+        LOG.warning("cannot add KDP reference comment to alert %s: %s", alert_id, exc)
     case_id = _maybe_escalate(payload, key, kind, external_id, alert_id)
     if kind == "anomaly":
         _remember_group(payload, alert_id, case_id)
