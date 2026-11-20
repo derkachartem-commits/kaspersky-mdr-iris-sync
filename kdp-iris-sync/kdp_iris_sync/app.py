@@ -262,10 +262,18 @@ def _close_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str)
     )
     if row and row["case_id"]:
         case_id = int(row["case_id"])
+        note = f"Конец: {end_time}"
+        start = str(payload.get("start_time") or "")
+        if start:
+            note = f"Начало: {start}; " + note
         try:
-            IRIS.append_case_description(case_id, f"Конец: {end_time}")
+            IRIS.add_case_note(case_id, "KDP: аномалия завершена", note)
         except Exception as exc:  # noqa: BLE001
-            LOG.warning("cannot append end time to case %s: %s", case_id, exc)
+            LOG.warning("cannot add close note to case %s: %s", case_id, exc)
+            try:
+                IRIS.append_case_description(case_id, note)
+            except Exception as exc2:  # noqa: BLE001
+                LOG.warning("cannot append close text to case %s: %s", case_id, exc2)
         try:
             IRIS.update_case(case_id, case_dates({"end_time": end_time}))
         except Exception as exc:  # noqa: BLE001
