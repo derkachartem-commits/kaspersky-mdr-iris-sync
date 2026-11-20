@@ -8,6 +8,7 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -24,13 +25,14 @@ from .mapping import (
     CLOSING_TYPES,
     build_alert,
     build_case_payload,
+    case_dates,
     close_comment,
     event_identity,
     severity_for,
     status_id_for,
 )
 from .pull import KdpPuller
-from .state import State
+from .state import State, utcnow
 from .token_refresh import TokenRefresher
 
 LOG = logging.getLogger("kdp")
@@ -64,6 +66,88 @@ def setup_logging() -> None:
     )
 
 
+# --------------------------------------------------------------- grouping
+GROUP_PREFIX = "kdp_group:"
+
+
+def _group_key(resource: str) -> str:
+    return GROUP_PREFIX + resource
+
+
+def _group_window_seconds() -> int:
+    return int((CONFIG.get("dedupe") or {}).get("anomaly_group_minutes", 30)) * 60
+
+
+def _remember_group(payload: Dict[str, Any], alert_id: int, case_id: Optional[int]) -> None:
+    resource = str(payload.get("resource_name") or "")
+    if not resource:
+        return
+    STATE.set_meta(
+        _group_key(resource),
+        json.dumps(
+            {
+                "alert_id": int(alert_id),
+                "case_id": int(case_id) if case_id else None,
+                "last_seen": utcnow(),
+            }
+        ),
+    )
+
+
+def _metric_note(payload: Dict[str, Any]) -> str:
+    parts = ["KDP: новая метрика по тому же ресурсу."]
+    parts.append(
+        f"Значение: {payload.get('max_value')}, порог: {payload.get('threshold')}."
+    )
+    if payload.get("timestamp"):
+        parts.append(f"Время: {payload.get('timestamp')}.")
+    return " ".join(parts)
+
+
+def _try_group_anomaly(
+    payload: Dict[str, Any], key: str, kind: str, external_id: str
+) -> bool:
+    """Attach a fresh anomaly to the open case/alert of the same resource."""
+    window = _group_window_seconds()
+    if window <= 0:
+        return False
+    resource = str(payload.get("resource_name") or "")
+    raw = STATE.get_meta(_group_key(resource)) if resource else ""
+    if not raw:
+        return False
+    try:
+        group = json.loads(raw)
+        last_seen = datetime.fromisoformat(str(group.get("last_seen") or ""))
+    except (ValueError, TypeError):
+        return False
+    if (datetime.now(timezone.utc) - last_seen).total_seconds() > window:
+        return False
+    alert_id = int(group.get("alert_id") or 0)
+    if not alert_id:
+        return False
+    case_id = group.get("case_id")
+
+    STATE.open_event(key, kind, external_id, resource, payload)
+    STATE.set_alert_id(key, alert_id)
+    if case_id:
+        STATE.set_case_id(key, int(case_id))
+
+    note = _metric_note(payload)
+    try:
+        IRIS.add_comment("alerts", alert_id, note)
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("cannot comment grouped alert %s: %s", alert_id, exc)
+    if case_id:
+        try:
+            IRIS.append_case_description(int(case_id), note)
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("cannot append to case %s: %s", case_id, exc)
+
+    _remember_group(payload, alert_id, case_id)
+    LOG.info("anomaly %s grouped into alert %s (resource=%s)", key, alert_id, resource)
+    return True
+
+
 # --------------------------------------------------------------- processing
 def _create_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str) -> Optional[int]:
     body = build_alert(
@@ -75,7 +159,9 @@ def _create_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str
         raise IrisApiError(f"IRIS не вернул alert_id: {data!r}")
     STATE.set_alert_id(key, alert_id)
     LOG.info("alert created: kdp=%s iris_alert=%s", key, alert_id)
-    _maybe_escalate(payload, key, kind, external_id, alert_id)
+    case_id = _maybe_escalate(payload, key, kind, external_id, alert_id)
+    if kind == "anomaly":
+        _remember_group(payload, alert_id, case_id)
     return alert_id
 
 
@@ -85,11 +171,11 @@ def _maybe_escalate(
     kind: str,
     external_id: str,
     alert_id: int,
-) -> None:
+) -> Optional[int]:
     """Create a case for a freshly created alert (auto-escalation)."""
     auto = CONFIG.get("auto_escalate") or {}
     if not auto.get("enabled"):
-        return
+        return None
     try:
         body = build_case_payload(
             payload, config=CONFIG, kind=kind, external_id=external_id
@@ -98,11 +184,19 @@ def _maybe_escalate(
         case_id = case_id_from_response(data)
         if case_id is None:
             LOG.warning("escalation returned no case_id for alert %s: %r", alert_id, data)
-            return
-        STATE.set_case_id(key, case_id)
+            return None
+        STATE.set_case_id(key, int(case_id))
+        dates = case_dates(payload)
+        if dates.get("open_date"):
+            try:
+                IRIS.update_case(int(case_id), {"open_date": dates["open_date"]})
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("cannot set open_date on case %s: %s", case_id, exc)
         LOG.info("alert %s escalated to case %s", alert_id, case_id)
+        return int(case_id)
     except Exception as exc:  # noqa: BLE001 - escalation must not drop the alert
         LOG.error("auto-escalation failed for alert %s: %s", alert_id, exc)
+        return None
 
 
 def _close_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str) -> None:
@@ -134,17 +228,41 @@ def _close_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str)
         STATE.close_event(key)
         return
 
+    others = [
+        item
+        for item in STATE.list_events("open", limit=1000)
+        if item["event_key"] != key
+        and item["alert_id"]
+        and int(item["alert_id"]) == alert_id
+    ]
+    if others:
+        STATE.close_event(key)
+        LOG.info(
+            "alert %s still has %s open grouped event(s) - keep it open",
+            alert_id,
+            len(others),
+        )
+        return
+
+    end_time = str(payload.get("end_time") or payload.get("timestamp") or utcnow())
     IRIS.add_comment("alerts", alert_id, close_comment(payload))
     IRIS.update_alert(
         alert_id, {"alert_status_id": int(CONFIG["iris"].get("alert_status_closed", 2))}
     )
     if row and row["case_id"]:
+        case_id = int(row["case_id"])
         try:
-            IRIS.add_comment(
-                "cases", int(row["case_id"]), close_comment(payload)
-            )
+            IRIS.append_case_description(case_id, f"Конец: {end_time}")
         except Exception as exc:  # noqa: BLE001
-            LOG.warning("cannot comment case %s: %s", row["case_id"], exc)
+            LOG.warning("cannot append end time to case %s: %s", case_id, exc)
+        try:
+            IRIS.update_case(case_id, case_dates({"end_time": end_time}))
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("cannot set close date on case %s: %s", case_id, exc)
+
+    resource_key = str(payload.get("resource_name") or payload.get("kdp_resource") or "")
+    if resource_key:
+        STATE.set_meta(_group_key(resource_key), "")
     STATE.close_event(key)
     LOG.info("alert closed: kdp=%s iris_alert=%s", key, alert_id)
 
@@ -175,6 +293,9 @@ def process_payload(payload: Dict[str, Any]) -> None:
             except Exception as exc:  # noqa: BLE001
                 LOG.warning("cannot update alert %s status: %s", row["alert_id"], exc)
         LOG.info("duplicate open event ignored: %s", key)
+        return
+
+    if kind == "anomaly" and _try_group_anomaly(payload, key, kind, external_id):
         return
 
     STATE.open_event(key, kind, external_id, resource, payload)

@@ -38,6 +38,9 @@ kdp:
   password: ""                   # НЕ коммитить; лучше env KDP_PASSWORD
   refresh_token: true
   token_refresh_hours: 12
+dedupe:
+  # одна аномалия (несколько метрик одного ресурса) = один алерт/кейс
+  anomaly_group_minutes: 30
 auto_close:
   enabled: true
   only_if_status_new: true

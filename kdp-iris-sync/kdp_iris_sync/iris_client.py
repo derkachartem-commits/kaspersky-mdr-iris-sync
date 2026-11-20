@@ -143,6 +143,19 @@ class IrisClient:
         data = self._data(raw)
         return data if isinstance(data, dict) else {}
 
+    def append_case_description(self, case_id: int, text: str) -> Dict[str, Any]:
+        """Append a line to the case description.
+
+        IRIS v3 boards store case comments as notes (which need a directory),
+        so the connector keeps the event timeline in the description instead.
+        """
+        case = self.get_case(case_id)
+        description = str(case.get("case_description") or "")
+        if text in description:
+            return case
+        updated = (description + "\n\n" + text).strip()
+        return self.update_case(case_id, {"case_description": updated})
+
     def update_case_state(self, case_id: int, status_id: int) -> Dict[str, Any]:
         """Set a case status across IRIS v2 and v3.
 
