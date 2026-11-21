@@ -344,6 +344,65 @@ def process_payload(payload: Dict[str, Any]) -> None:
     _create_alert(payload, key, kind, external_id)
 
 
+def reconcile_groups() -> None:
+    """Close alerts whose grouped KDP events are all finished.
+
+    Safety net: a crash or an interrupted close can leave an escalated alert
+    (and its case) open after every anomaly behind it has already ended.
+    """
+    auto = CONFIG.get("auto_close") or {}
+    if not auto.get("enabled", True):
+        return
+    closeable = [int(item) for item in auto.get("closeable_status_ids", [2, 4, 8])]
+    closed_status = int(CONFIG["iris"].get("alert_status_closed", 6))
+    case_state = int(auto.get("case_closed_state_id", 9))
+    open_by_alert = {}
+    for row in STATE.list_events("open", limit=1000):
+        if row["alert_id"]:
+            open_by_alert.setdefault(int(row["alert_id"]), 0)
+            open_by_alert[int(row["alert_id"])] += 1
+    for meta in STATE.list_meta("kdp_group:"):
+        try:
+            group = json.loads(meta["value"] or "{}")
+        except ValueError:
+            continue
+        alert_id = int(group.get("alert_id") or 0)
+        if not alert_id or open_by_alert.get(alert_id):
+            continue
+        try:
+            alert = IRIS.get_alert(alert_id)
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("reconcile: cannot read alert %s: %s", alert_id, exc)
+            continue
+        status = alert.get("alert_status_id")
+        if status is not None and int(status) not in closeable:
+            continue
+        try:
+            IRIS.add_comment("alerts", alert_id, "KDP: аномалия завершена (авто-закрытие)")
+            IRIS.update_alert(alert_id, {"alert_status_id": closed_status})
+            LOG.info("reconcile: alert %s closed (no open events)", alert_id)
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("reconcile: cannot close alert %s: %s", alert_id, exc)
+            continue
+        case_id = int(group.get("case_id") or 0)
+        if case_id and auto.get("close_case", True):
+            try:
+                IRIS.update_case_state(case_id, case_state)
+                LOG.info("reconcile: case %s closed (state=%s)", case_id, case_state)
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("reconcile: cannot close case %s: %s", case_id, exc)
+        STATE.set_meta(meta["key"], "")
+
+
+def reconcile_loop(stop: threading.Event) -> None:
+    while not stop.is_set():
+        try:
+            reconcile_groups()
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("reconcile failed: %s", exc)
+        stop.wait(120)
+
+
 def worker_loop(stop: threading.Event) -> None:
     delay = 0.5
     while not stop.is_set():
@@ -377,6 +436,8 @@ _refresher = TokenRefresher(CONFIG, CONFIG_PATH, _puller.update_token, _stop)
 _puller.on_auth_error = _refresher.trigger
 _puller.start()
 _refresher.start()
+_reconciler = threading.Thread(target=reconcile_loop, args=(_stop,), daemon=True)
+_reconciler.start()
 
 
 @app.on_event("shutdown")
