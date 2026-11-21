@@ -93,6 +93,7 @@ def anomaly_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "threshold": _pick(item, "threshold", default=0),
         "excess_percentage": _pick(item, "excess_percentage", "excess", default=0),
         "_status": _pick(item, "status", "state", "anomaly_status", default=""),
+        "_last": _pick(item, "last", "last_seen", "timestamp", "start_time", default=""),
         "_source": "pull",
     }
 
@@ -244,8 +245,10 @@ class KdpPuller(threading.Thread):
                 if not payload.get("anomaly_id"):
                     LOG.warning("anomaly without id skipped: %s", json.dumps(item)[:300])
                     continue
-                if is_closed_status(payload):
-                    self.process(stop_payload(kind, key, payload))
+                if is_closed_status(payload) or self._is_stale(payload):
+                    if self._has_open_event(key):
+                        self.process(stop_payload(kind, key, payload))
+                        stats["closed"] += 1
                     continue
                 active[key] = payload
                 self.process(payload)
@@ -253,12 +256,33 @@ class KdpPuller(threading.Thread):
             polled.append(("anomaly", active))
 
         if self.cfg.get("close_missing", True):
-            stats["closed"] = self._close_missing(polled)
+            stats["closed"] += self._close_missing(polled)
 
         self.state.set_meta("pull_last_success", utcnow())
         self.state.set_meta("pull_last_stats", json.dumps(stats))
         self.state.set_meta("pull_last_error", "")
         return stats
+
+    def _is_stale(self, payload: Dict[str, Any]) -> bool:
+        """An anomaly is over when KDP stopped refreshing its last-seen tick."""
+        limit = max(60, int(self.cfg.get("anomaly_stale_seconds", 600)))
+        raw = str(payload.get("_last") or "").strip()
+        if not raw:
+            return False
+        text = raw.replace("Z", "+00:00")
+        try:
+            seen = datetime.fromisoformat(text)
+        except ValueError:
+            return False
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - seen).total_seconds() > limit
+
+    def _has_open_event(self, key: str) -> bool:
+        for row in self.state.list_events("open", limit=500):
+            if row["event_key"] == key:
+                return True
+        return False
 
     def _close_missing(self, polled: List[Tuple[str, Dict[str, Any]]]) -> int:
         closed = 0
