@@ -111,6 +111,15 @@ class State:
             row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
             return row["value"] if row else default
 
+    def list_meta(self, prefix: str) -> List[sqlite3.Row]:
+        with self._connect() as db:
+            return list(
+                db.execute(
+                    "SELECT key, value FROM meta WHERE key LIKE ? ORDER BY key",
+                    (prefix + "%",),
+                )
+            )
+
     # ---------------------------------------------------------------- events
     def get_event(self, key: str) -> Optional[sqlite3.Row]:
         with self._connect() as db:
