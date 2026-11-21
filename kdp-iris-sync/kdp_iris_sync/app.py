@@ -105,6 +105,16 @@ def _metric_note(payload: Dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _alert_is_closed(alert_id: int) -> bool:
+    try:
+        alert = IRIS.get_alert(alert_id)
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("cannot read alert %s: %s", alert_id, exc)
+        return False
+    closed_id = int(CONFIG["iris"].get("alert_status_closed", 6))
+    return alert.get("alert_status_id") == closed_id
+
+
 def _try_group_anomaly(
     payload: Dict[str, Any], key: str, kind: str, external_id: str
 ) -> bool:
@@ -125,6 +135,12 @@ def _try_group_anomaly(
         return False
     alert_id = int(group.get("alert_id") or 0)
     if not alert_id:
+        return False
+    if _alert_is_closed(alert_id):
+        LOG.info(
+            "group alert %s is closed - creating a new alert for %s", alert_id, resource
+        )
+        STATE.set_meta(_group_key(resource), "")
         return False
     case_id = group.get("case_id")
 
