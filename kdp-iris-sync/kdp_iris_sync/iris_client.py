@@ -230,9 +230,12 @@ class IrisClient:
             "state_id": int(status_id),
             "status_id": int(status_id),
         }
+        # Older IRIS releases read the note from the close body; beta.23+
+        # ignores it, so it is written separately as `closing_note` below.
         if resolution_note:
             body["case_resolution_note"] = resolution_note
 
+        result: Optional[Dict[str, Any]] = None
         try:
             raw = self._request(
                 "POST",
@@ -241,7 +244,7 @@ class IrisClient:
                 expected=(200, 201),
             )
             data = self._data(raw)
-            return data if isinstance(data, dict) else {}
+            result = data if isinstance(data, dict) else {}
         except IrisApiError as exc:
             if exc.status_code not in (404, 405):
                 self.log.warning(
@@ -250,23 +253,32 @@ class IrisClient:
                     exc,
                 )
 
-        try:
-            return self.update_case_state(case_id, status_id)
-        except IrisApiError as exc:
-            self.log.warning(
-                "PUT status for IRIS case %s failed (%s); falling back to /case/close",
-                case_id,
-                exc,
-            )
+        if result is None:
+            try:
+                result = self.update_case_state(case_id, status_id)
+            except IrisApiError as exc:
+                self.log.warning(
+                    "PUT status for IRIS case %s failed (%s); falling back to /case/close",
+                    case_id,
+                    exc,
+                )
+                raw = self._request(
+                    "POST",
+                    f"/case/close/{int(case_id)}",
+                    json_body=body,
+                    expected=(200, 201),
+                )
+                data = self._data(raw)
+                result = data if isinstance(data, dict) else {}
 
-        raw = self._request(
-            "POST",
-            f"/case/close/{int(case_id)}",
-            json_body=body,
-            expected=(200, 201),
-        )
-        data = self._data(raw)
-        return data if isinstance(data, dict) else {}
+        if resolution_note:
+            try:
+                self.update_case(int(case_id), {"closing_note": resolution_note})
+            except IrisApiError as exc:
+                self.log.warning(
+                    "cannot store closing_note on case %s: %s", case_id, exc
+                )
+        return result
 
     # ------------------------------------------------------------ comments
     def list_comments(

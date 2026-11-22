@@ -226,6 +226,49 @@ def _maybe_escalate(
         return None
 
 
+def _auto_close_reason(
+    alert_id: int,
+    *,
+    kind: str = "событие",
+    resource: str = "",
+    start: str = "",
+    end: str = "",
+    why: str = "",
+) -> str:
+    """Human readable justification stored on the case when it is auto-closed."""
+    lines = [f"Кейс закрыт автоматически коннектором KDP: {kind} {why or 'завершилась'}."]
+    if resource:
+        lines.append(f"Ресурс: {resource}")
+    if start:
+        lines.append(f"Начало: {start}")
+    if end:
+        lines.append(f"Конец: {end}")
+    lines.append(f"IRIS alert: #{alert_id}")
+    lines.append(f"Закрыто: {utcnow()} (kdp-iris-sync)")
+    return "\n".join(lines)
+
+
+def _close_case_with_reason(case_id: int, state_id: int, reason: str) -> None:
+    """Close a case and leave the reason both as a note and as closing_note."""
+    try:
+        IRIS.add_case_note(case_id, "KDP: кейс закрыт автоматически", reason)
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("cannot add close note to case %s: %s", case_id, exc)
+        try:
+            IRIS.append_case_description(case_id, reason)
+        except Exception as exc2:  # noqa: BLE001
+            LOG.warning("cannot append close text to case %s: %s", case_id, exc2)
+    try:
+        IRIS.close_case(case_id, state_id, resolution_note=reason)
+        LOG.info("case %s closed (state=%s) with closing note", case_id, state_id)
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("cannot close case %s: %s", case_id, exc)
+        try:
+            IRIS.update_case_state(case_id, state_id)
+        except Exception as exc2:  # noqa: BLE001
+            LOG.warning("cannot update state of case %s: %s", case_id, exc2)
+
+
 def _close_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str) -> None:
     if not (CONFIG.get("auto_close") or {}).get("enabled", True):
         LOG.info("auto_close disabled; skip close for %s", key)
@@ -278,29 +321,21 @@ def _close_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str)
     )
     if row and row["case_id"]:
         case_id = int(row["case_id"])
-        note = f"Конец: {end_time}"
-        start = str(payload.get("start_time") or "")
-        if start:
-            note = f"Начало: {start}; " + note
-        try:
-            IRIS.add_case_note(case_id, "KDP: аномалия завершена", note)
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("cannot add close note to case %s: %s", case_id, exc)
-            try:
-                IRIS.append_case_description(case_id, note)
-            except Exception as exc2:  # noqa: BLE001
-                LOG.warning("cannot append close text to case %s: %s", case_id, exc2)
+        reason = _auto_close_reason(
+            alert_id,
+            kind="аномалия" if kind == "anomaly" else "атака",
+            resource=str(payload.get("resource_name") or payload.get("kdp_resource") or ""),
+            start=str(payload.get("start_time") or ""),
+            end=end_time,
+            why="больше не активна в KDP",
+        )
         try:
             IRIS.update_case(case_id, case_dates({"end_time": end_time}))
         except Exception as exc:  # noqa: BLE001
             LOG.warning("cannot set close date on case %s: %s", case_id, exc)
         if (CONFIG.get("auto_close") or {}).get("close_case", True):
             closed_state = int((CONFIG.get("auto_close") or {}).get("case_closed_state_id", 9))
-            try:
-                IRIS.update_case_state(case_id, closed_state)
-                LOG.info("case %s closed (state=%s)", case_id, closed_state)
-            except Exception as exc:  # noqa: BLE001
-                LOG.warning("cannot close case %s: %s", case_id, exc)
+            _close_case_with_reason(case_id, closed_state, reason)
 
     resource_key = str(payload.get("resource_name") or payload.get("kdp_resource") or "")
     if resource_key:
@@ -386,11 +421,12 @@ def reconcile_groups() -> None:
             continue
         case_id = int(group.get("case_id") or 0)
         if case_id and auto.get("close_case", True):
-            try:
-                IRIS.update_case_state(case_id, case_state)
-                LOG.info("reconcile: case %s closed (state=%s)", case_id, case_state)
-            except Exception as exc:  # noqa: BLE001
-                LOG.warning("reconcile: cannot close case %s: %s", case_id, exc)
+            reason = _auto_close_reason(
+                alert_id,
+                kind="инцидент",
+                why="завершился (в KDP не осталось активных событий, реконсиляция)",
+            )
+            _close_case_with_reason(case_id, case_state, reason)
         STATE.set_meta(meta["key"], "")
 
 
