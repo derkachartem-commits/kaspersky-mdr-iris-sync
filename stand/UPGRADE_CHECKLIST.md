@@ -15,7 +15,7 @@
 ### 1. Образ backend (`iris-backend:tasks-fix-23`)
 Две правки в исходниках, вшиты в образ:
 - `app/blueprints/rest/v2/case_routes/tasks.py` — терпимый partial-update статуса задачи (assignee больше не обязателен, `partial=True`). Фикс beta.22 «Done не нажимается».
-- `app/datamgmt/custom_dashboard/named_aggregations.py` — агрегации `cases_open_total`, `cases_open_over_24h`, `cases_avg_close_hours` (скрипты `patches/dash-aggregations.py`, `patches/dash-aggregations-import.py`).
+- `app/datamgmt/custom_dashboard/named_aggregations.py` — агрегации `cases_open_total`, `cases_open_over_24h`, `cases_avg_close_hours`. Теперь монтируется файлом (`patches/named_aggregations.py`), а не только в образе; `cases_avg_close_hours` считает через `extract('epoch', close_date - open_date)/3600` — иначе после перевода дат в timestamp приходит `timedelta` и дашборд падает с `float() argument must be...`.
 Образ собирался вручную (docker cp + commit), `/opt/iris3-fix/Dockerfile` покрывает только tasks.py.
 **Действие:** скопировать оба файла из нового образа, перенести правки, собрать образ, обновить тег в `docker-compose.override.yml`.
 **Проверка:** `PUT /api/v2/cases/<id>/tasks/<tid>` только со статусом; дашборд «SOC — открытые кейсы и алерты» отдаёт KPI.
