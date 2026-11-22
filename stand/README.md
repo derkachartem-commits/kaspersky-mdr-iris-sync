@@ -56,3 +56,16 @@ Socket.IO, логин и API кейсов. Запускать после каж�
 ```bash
 bash /root/iris-smoke.sh
 ```
+
+## Обновление версии IRIS
+
+Список всего, что накопилось и требует повторного применения после обновления образов —
+[`UPGRADE_CHECKLIST.md`](UPGRADE_CHECKLIST.md). Полуавтомат для самой хрупкой части
+(mounted `models/cases.py`, `schema/marshables.py`, `configuration.py` + миграция дат):
+
+```bash
+./stand/reapply-patches.sh v3.0.0-beta.23
+```
+
+Образ backend (`tasks.py` + агрегации дашборда) и данные (шаблоны кейсов, дашборд) —
+вручную по пунктам 1 и 8 чек-листа.
