@@ -25,3 +25,34 @@ sudo bash /root/update-stand.sh
 * `compose/docker-compose.override.yml` — подключает образ и монтирования к `app`/`worker`/`nginx`.
 
 **Важно:** патчи привязаны к версии IRIS `v3.0.0-beta.22` (см. `backend/Dockerfile`). После обновления IRIS на другую версию `tasks.py` нужно переложить на новый файл и пересобрать образ.
+
+## Браузерный origin (важно)
+
+IRIS проверяет `Origin` для Socket.IO (совместное редактирование заметок/описания кейса).
+Если стенд открывают по домену, а в `.env` остался только IP, рукопожатие получает
+`400 Not an accepted origin`, и тело кейса навсегда остаётся скелетоном
+(шапка и счётчики рисуются, описание — нет).
+
+```
+IRIS_ALLOW_ORIGIN=https://neko.vbrr.online:8446,https://IRIS_HOST_OLD:8446
+PUBLIC_EXTERNAL_API_URL=https://neko.vbrr.online:8446
+```
+
+После правки `.env` — `docker compose -p iris3 up -d app worker frontend nginx`.
+
+## nginx-патч (gzip/http2/immutable)
+
+`/entrypoint.sh` образа iris-nginx сам разворачивает шаблон конфига и запускает nginx,
+поэтому патч накладывается из `patches/50-iris-patch-after-start.sh` (запускается
+из entrypoint в фоне, ждёт готовый конфиг, применяет `40-iris-static.sh`, делает reload).
+`/_app/` проксируется в живой frontend-контейнер с `Cache-Control: immutable`;
+копию клиента (`client.new`) использовать нельзя — рассинхрон сборки даёт пустые кейсы.
+
+## Смоук-тест
+
+`/root/iris-smoke.sh` проверяет gzip, HTTP/2, immutable-ассеты, принятие origin
+Socket.IO, логин и API кейсов. Запускать после каждого обновления:
+
+```bash
+bash /root/iris-smoke.sh
+```

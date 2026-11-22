@@ -1,10 +1,15 @@
-﻿services:
+services:
   app:
-    image: iris-backend:tasks-fix
+    image: ${IRIS_PATCH_IMAGE:-iris-backend:tasks-fix}
     volumes:
       - ./patches/configuration.py:/iriswebapp/app/configuration.py:ro
   worker:
-    image: iris-backend:tasks-fix
+    image: ${IRIS_PATCH_IMAGE:-iris-backend:tasks-fix}
   nginx:
+    # IRIS's /entrypoint.sh expands the config template and execs nginx; the
+    # gzip/http2/immutable patch must run after that, so it is applied in the
+    # background and nginx is reloaded.
+    entrypoint: ["/bin/bash", "-c", "/bin/sh /opt/iris-patch/50-iris-patch-after-start.sh & exec /entrypoint.sh"]
     volumes:
       - ./patches/ctx.js:/www/data/ctx.js:ro
+      - ./patches:/opt/iris-patch:ro

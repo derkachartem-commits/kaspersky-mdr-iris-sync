@@ -65,13 +65,22 @@ cd "$IRIS_DIR"
 log "recreating app/worker/nginx ($IRIS_PROJECT)"
 $COMPOSE -p "$IRIS_PROJECT" up -d app worker nginx
 
-# --- 4. nginx static/gzip/http2 patch inside the container -----------------
+# --- 4. nginx gzip/http2/immutable patch ----------------------------------
+# The compose override runs patches/50-iris-patch-after-start.sh from the
+# container entrypoint, so a plain recreate re-applies it. Enforce it here
+# as well for containers started before the override existed.
 NGINX_ID="$($COMPOSE -p "$IRIS_PROJECT" ps -q nginx | head -1)"
 if [ -n "$NGINX_ID" ]; then
-  docker cp "$PATCH_DIR/patches/40-iris-static.sh" "$NGINX_ID":/docker-entrypoint.d/40-iris-static.sh 2>/dev/null || true
-  docker exec "$NGINX_ID" sh /docker-entrypoint.d/40-iris-static.sh >/dev/null 2>&1 || true
-  docker exec "$NGINX_ID" nginx -s reload >/dev/null 2>&1 || true
+  docker exec "$NGINX_ID" sh -c 'grep -q iris_immutable_assets /etc/nginx/nginx.conf || sh /opt/iris-patch/40-iris-static.sh' >/dev/null 2>&1 || true
+  docker exec "$NGINX_ID" nginx -t >/dev/null 2>&1 && docker exec "$NGINX_ID" nginx -s reload >/dev/null 2>&1 || true
   log "nginx patch applied and reloaded"
+fi
+
+# --- 4b. regression smoke test ---------------------------------------------
+if [ -x "$IRIS_DIR/../iris-smoke.sh" ]; then
+  "$IRIS_DIR/../iris-smoke.sh" || log "WARNING: smoke test failed"
+elif command -v curl >/dev/null 2>&1; then
+  log "no smoke test installed, skipping"
 fi
 
 # --- 5. health check --------------------------------------------------------
