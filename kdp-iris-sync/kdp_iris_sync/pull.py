@@ -89,10 +89,10 @@ def anomaly_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "check_name": _pick(
             item, "check_short_name", "check_name", "metric", "name", default="metric"
         ),
-        "check_measurement": _pick(item, "check_measurement", "unit", default=""),
+        "check_measurement": _pick(item, "check_measurement", "check_measure_units", "unit", default=""),
         "max_value": _pick(item, "max_value", "value", default=0),
         "threshold": _pick(item, "threshold", default=0),
-        "excess_percentage": _pick(item, "excess_percentage", "excess", default=0),
+        "excess_percentage": _pick(item, "excess_percentage", "excess", "percentage", default=0),
         "_status": _pick(item, "status", "state", "anomaly_status", default=""),
         "_last": _pick(item, "last", "last_seen", "timestamp", "start_time", default=""),
         "_source": "pull",

@@ -117,11 +117,20 @@ def _context_lines(payload: Dict[str, Any]) -> list[str]:
             f"Атакованные IP: {', '.join(payload.get('attacked_ips') or []) or '—'}",
         ]
     elif msg.startswith("anomaly"):
+        excess = payload.get("excess_percentage")
+        try:
+            if excess in (None, "", 0, "0", 0.0, "0.0"):
+                _v = float(payload.get("max_value") or 0)
+                _t = float(payload.get("threshold") or 0)
+                if _t:
+                    excess = round((_v / _t - 1) * 100, 1)
+        except (TypeError, ValueError):
+            pass
         lines += [
             f"Параметр: {payload.get('check_name')}",
             f"Значение: {payload.get('max_value')} {payload.get('check_measurement') or ''}".strip(),
             f"Порог: {payload.get('threshold')}",
-            f"Превышение: {payload.get('excess_percentage')} %",
+            f"Превышение: {excess} %",
             f"Метка времени: {payload.get('timestamp')}",
         ]
     elif msg == "bgp_down":
