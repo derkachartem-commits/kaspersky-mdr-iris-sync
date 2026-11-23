@@ -102,6 +102,10 @@ def _context_lines(payload: Dict[str, Any]) -> list[str]:
     ports = payload.get("attacked_ports") or payload.get("dst_ports") or payload.get("ports") or []
     if ports:
         lines.append("Порты: " + ", ".join(str(x) for x in ports))
+    if payload.get("_ports"):
+        lines.append("Разрешённые порты: " + str(payload["_ports"]))
+    if payload.get("_geo"):
+        lines.append("Гео-фильтр: " + str(payload["_geo"]))
     if msg.startswith("attack"):
         mp = payload.get("max_point_values") or {}
         lines += [
@@ -273,6 +277,10 @@ def build_case_payload(
     ports = payload.get("attacked_ports") or []
     if ports:
         description += " Порты: " + ", ".join(str(x) for x in ports) + "."
+    if payload.get("_ports"):
+        description += " Разрешённые порты: " + str(payload["_ports"]) + "."
+    if payload.get("_geo"):
+        description += " Гео-фильтр: " + str(payload["_geo"]) + "."
 
     body: Dict[str, Any] = {
         "case_title": title[:190],

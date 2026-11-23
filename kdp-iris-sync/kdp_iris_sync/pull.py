@@ -148,6 +148,8 @@ class KdpPuller(threading.Thread):
         # resource_id -> [ips]; refreshed periodically from /resources/
         self.resources: Dict[int, List[str]] = {}
         self._resources_loaded_at: Optional[datetime] = None
+        # resource_id -> {"ports": str, "geo": str, "at": datetime}
+        self.resource_meta: Dict[int, Dict[str, Any]] = {}
 
     # ------------------------------------------------------------------ http
     def _headers(self) -> Dict[str, str]:
@@ -244,6 +246,64 @@ class KdpPuller(threading.Thread):
         except Exception as exc:  # noqa: BLE001
             LOG.warning("cannot load KDP resources: %s", exc)
 
+    def _load_resource_meta(self, rid: int) -> None:
+        """Fetch ports/protocols and the geo-filter state of one resource."""
+        base = str(self.cfg.get("api_url") or "").rstrip("/")
+        if not base:
+            return
+        locale = int(self.cfg.get("anomalies_locale_id", 10))
+        kwargs = {
+            "verify": self.cfg.get("ca_bundle") or self.cfg.get("verify", True),
+            "timeout": int(self.cfg.get("timeout", 30)),
+        }
+        meta: Dict[str, Any] = {"ports": "", "geo": "", "at": datetime.now(timezone.utc)}
+        try:
+            resp = self.session.get(f"{base}/resource/{rid}/", params={"locale_id": locale}, **kwargs)
+            if resp.status_code == 200:
+                detail = resp.json() or {}
+                parts = []
+                for item in detail.get("fprofiles") or []:
+                    proto = str(item.get("protocol") or "").strip()
+                    port = item.get("port") or 0
+                    if proto and int(port or 0) > 0:
+                        parts.append(f"{proto}/{port}")
+                    elif proto:
+                        parts.append(proto)
+                meta["ports"] = ", ".join(parts)
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("cannot load resource %s detail: %s", rid, exc)
+        try:
+            resp = self.session.get(f"{base}/resource/{rid}/geo_filter/", params={"locale_id": locale}, **kwargs)
+            if resp.status_code == 200:
+                filters = resp.json() or []
+                if isinstance(filters, dict):
+                    filters = filters.get("data") or []
+                geo = "не настроен"
+                for item in filters:
+                    if str(item.get("system_name") or "") != "geofilter":
+                        continue
+                    if item.get("enabled"):
+                        countries = []
+                        for opt in item.get("options") or []:
+                            if opt.get("enabled"):
+                                countries.append(str(opt.get("short_name")))
+                        countries_text = ", ".join(countries)
+                        geo = "включён" + (f" ({countries_text})" if countries else "")
+                    else:
+                        geo = "выключен"
+                    break
+                meta["geo"] = geo
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("cannot load resource %s geo filter: %s", rid, exc)
+        self.resource_meta[rid] = meta
+
+    def _resource_meta(self, rid: int) -> Dict[str, Any]:
+        hours = max(1, int(self.cfg.get("resources_refresh_hours", 6)))
+        meta = self.resource_meta.get(rid)
+        if meta and (datetime.now(timezone.utc) - meta["at"]) <= timedelta(hours=hours):
+            return meta
+        self._load_resource_meta(rid)
+        return self.resource_meta.get(rid) or {}
     def _resources_stale(self) -> bool:
         hours = max(1, int(self.cfg.get("resources_refresh_hours", 6)))
         if not self._resources_loaded_at:
@@ -261,6 +321,11 @@ class KdpPuller(threading.Thread):
         ips = self.resources.get(rid)
         if ips:
             payload["_ips"] = ips
+        meta = self._resource_meta(rid)
+        if meta.get("ports"):
+            payload["_ports"] = meta["ports"]
+        if meta.get("geo"):
+            payload["_geo"] = meta["geo"]
     # ------------------------------------------------------------------ poll
     def poll_once(self) -> Dict[str, int]:
         base = str(self.cfg.get("api_url") or "").rstrip("/")
