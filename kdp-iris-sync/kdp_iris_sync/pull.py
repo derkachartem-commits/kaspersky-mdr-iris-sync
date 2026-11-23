@@ -339,7 +339,9 @@ class KdpPuller(threading.Thread):
                         countries = []
                         for opt in item.get("options") or []:
                             if opt.get("enabled"):
-                                countries.append(str(opt.get("short_name")))
+                                label = str(opt.get("short_name") or "")
+                                if "list" in label.lower() or "countr" in label.lower():
+                                    countries.append(label)
                         countries_text = ", ".join(countries)
                         geo = "включён" + (f" ({countries_text})" if countries else "")
                     else:
@@ -418,13 +420,14 @@ class KdpPuller(threading.Thread):
             active = {}
             for item in items:
                 payload = anomaly_payload(item)
+                self._enrich(payload)
                 key, kind, _ = event_identity(payload)
                 if not payload.get("anomaly_id"):
                     LOG.warning("anomaly without id skipped: %s", json.dumps(item)[:300])
                     continue
                 if is_closed_status(payload) or self._is_stale(payload):
                     if self._has_open_event(key):
-                        self.process(stop_payload(kind, key, payload))
+                        self._stop_event(kind, key, payload)
                         stats["closed"] += 1
                     continue
                 active[key] = payload
