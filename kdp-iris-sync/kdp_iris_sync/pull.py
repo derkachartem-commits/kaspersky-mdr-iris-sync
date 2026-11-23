@@ -107,6 +107,8 @@ def stop_payload(kind: str, event_key: str, details: Dict[str, Any]) -> Dict[str
             "msg_type": "attack_stop",
             "attack_id": external_id,
             "attack_type": details.get("attack_type") or "unknown",
+            "resource_id": details.get("resource_id"),
+            "attacked_ips": details.get("attacked_ips") or [],
             "start_time": details.get("start_time"),
             "end_time": utcnow(),
             "resource_name": details.get("resource_name"),
@@ -289,7 +291,7 @@ class KdpPuller(threading.Thread):
 
     def _stop_event(self, kind: str, key: str, details: Dict[str, Any]) -> None:
         payload = stop_payload(kind, key, details)
-        if kind == "anomaly":
+        if kind in ("anomaly", "attack"):
             # volume is always derived from the bps series of the resource
             size = self._volume_bytes(
                 payload.get("resource_id"), 1011, payload.get("start_time"), payload.get("end_time")

@@ -276,7 +276,7 @@ def refresh_case_volumes() -> None:
     """Keep the traffic volume line in open KDP cases up to date (5 min throttle)."""
     now = datetime.now(timezone.utc)
     for row in STATE.list_events("open", limit=200):
-        if not row["case_id"] or row["kind"] != "anomaly":
+        if not row["case_id"] or row["kind"] not in ("anomaly", "attack"):
             continue
         case_id = int(row["case_id"])
         if now.timestamp() - _VOL_LAST.get(case_id, 0) < 300:
@@ -330,8 +330,28 @@ def _auto_close_reason(
     return "\n".join(lines)
 
 
+def _case_volume_line(case_id: int, end_iso: Optional[str] = None) -> str:
+    """Final traffic volume for a case, derived from its description."""
+    try:
+        case = IRIS.get_case(int(case_id))
+    except Exception:  # noqa: BLE001
+        return ""
+    desc = str(case.get("case_description") or "")
+    m = re.search(r"Ресурс: .*?\(id=(\d+)\)", desc)
+    s = re.search(r"Начало:\s*([0-9T:.+\-Z]+)", desc)
+    if not m or not s:
+        return ""
+    size = _kdp_volume_bytes(int(m.group(1)), s.group(1), end_iso or utcnow())
+    if not size:
+        return ""
+    return "Объём за период: %.2f ГБ (%.0f МБ)" % (size / 1e9, size / 1e6)
+
 def _close_case_with_reason(case_id: int, state_id: int, reason: str) -> None:
     """Close a case and leave the reason both as a note and as closing_note."""
+    if "Объём за период" not in reason:
+        volume = _case_volume_line(case_id)
+        if volume:
+            reason = reason + "\n" + volume
     try:
         IRIS.add_case_note(case_id, "KDP: кейс закрыт автоматически", reason)
     except Exception as exc:  # noqa: BLE001

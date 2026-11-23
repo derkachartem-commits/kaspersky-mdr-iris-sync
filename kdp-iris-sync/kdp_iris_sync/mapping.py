@@ -156,6 +156,15 @@ def _context_lines(payload: Dict[str, Any]) -> list[str]:
         protocol = _CHECK_PROTOCOLS.get(str(payload.get("check_id")))
         if protocol:
             lines.append("Протокол: " + protocol)
+    elif msg.startswith("attack"):
+        attack_type = str(payload.get("attack_type") or "").upper()
+        for candidate in ("UDP", "TCP", "ICMP", "GRE", "ESP"):
+            if candidate in attack_type:
+                lines.append("Протокол: " + candidate)
+                break
+    if payload.get("volume_bytes"):
+        size = float(payload["volume_bytes"])
+        lines.append("Объём за период: %.2f ГБ (%.0f МБ)" % (size / 1e9, size / 1e6))
     return lines
 
 
