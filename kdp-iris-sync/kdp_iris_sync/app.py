@@ -234,6 +234,7 @@ def _auto_close_reason(
     start: str = "",
     end: str = "",
     why: str = "",
+    volume_bytes: int = 0,
 ) -> str:
     """Human readable justification stored on the case when it is auto-closed."""
     lines = [f"Кейс закрыт автоматически коннектором KDP: {kind} {why or 'завершилась'}."]
@@ -243,6 +244,8 @@ def _auto_close_reason(
         lines.append(f"Начало: {start}")
     if end:
         lines.append(f"Конец: {end}")
+    if volume_bytes:
+        lines.append("Объём за период: %.2f ГБ (%.0f МБ)" % (volume_bytes / 1e9, volume_bytes / 1e6))
     lines.append(f"IRIS alert: #{alert_id}")
     lines.append(f"Закрыто: {utcnow()} (kdp-iris-sync)")
     return "\n".join(lines)
@@ -328,6 +331,7 @@ def _close_alert(payload: Dict[str, Any], key: str, kind: str, external_id: str)
             start=str(payload.get("start_time") or ""),
             end=end_time,
             why="больше не активна в KDP",
+            volume_bytes=int(payload.get("volume_bytes") or 0),
         )
         try:
             IRIS.update_case(case_id, case_dates({"end_time": end_time}))

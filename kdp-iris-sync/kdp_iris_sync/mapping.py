@@ -89,6 +89,14 @@ def severity_for(payload: Dict[str, Any], thresholds: Dict[str, Any]) -> str:
     return "low"
 
 
+_CHECK_PROTOCOLS = {
+    "1022": "TCP (SYN)",
+    "1039": "UDP",
+    "1040": "ICMP",
+    "1041": "TCP",
+}
+
+
 def _context_lines(payload: Dict[str, Any]) -> list[str]:
     msg = str(payload.get("msg_type") or "")
     lines = [
@@ -144,6 +152,10 @@ def _context_lines(payload: Dict[str, Any]) -> list[str]:
         ]
     else:
         lines += [f"Необработанный payload: {json.dumps(payload, ensure_ascii=False)[:1500]}"]
+    if msg.startswith("anomaly"):
+        protocol = _CHECK_PROTOCOLS.get(str(payload.get("check_id")))
+        if protocol:
+            lines.append("Протокол: " + protocol)
     return lines
 
 

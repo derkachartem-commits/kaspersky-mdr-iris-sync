@@ -89,6 +89,7 @@ def anomaly_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "check_name": _pick(
             item, "check_short_name", "check_name", "metric", "name", default="metric"
         ),
+        "check_id": _pick(item, "check_id", default=""),
         "check_measurement": _pick(item, "check_measurement", "check_measure_units", "unit", default=""),
         "max_value": _pick(item, "max_value", "value", default=0),
         "threshold": _pick(item, "threshold", default=0),
@@ -115,6 +116,9 @@ def stop_payload(kind: str, event_key: str, details: Dict[str, Any]) -> Dict[str
     if kind == "anomaly":
         return {
             "msg_type": "anomaly_stop",
+            "resource_id": details.get("resource_id"),
+            "check_id": details.get("check_id"),
+            "start_time": details.get("start_time") or details.get("timestamp"),
             "anomaly_id": external_id,
             "timestamp": utcnow(),
             "resource_name": details.get("resource_name"),
@@ -246,6 +250,52 @@ class KdpPuller(threading.Thread):
         except Exception as exc:  # noqa: BLE001
             LOG.warning("cannot load KDP resources: %s", exc)
 
+    def _volume_bytes(self, resource_id, check_id, start, end):
+        """Bytes transferred between start and end (bps series, trapezoid)."""
+        base = str(self.cfg.get("api_url") or "").rstrip("/")
+        if not base or not resource_id or not check_id or not start or not end:
+            return None
+        try:
+            resp = self.session.post(
+                base + "/unit_checks/values/",
+                json={"filter": {"check_ids": [int(check_id)], "date_from": start, "date_to": end,
+                                  "points_count": 480, "resource_id": int(resource_id)}},
+                verify=self.cfg.get("ca_bundle") or self.cfg.get("verify", True),
+                timeout=int(self.cfg.get("timeout", 30)),
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json() or {}
+            series = []
+            for value in data.values():
+                series = (value or {}).get("dirty") or (value or {}).get("values") or []
+                if series:
+                    break
+            total = 0.0
+            prev = None
+            for ts, val in series:
+                if val is None:
+                    continue
+                moment = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if prev is not None:
+                    seconds = (moment - prev[0]).total_seconds()
+                    if 0 < seconds <= 300:
+                        total += (prev[1] + float(val)) / 2.0 * seconds
+                prev = (moment, float(val))
+            return (total / 8.0) if total else None
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("cannot compute volume for %s/%s: %s", resource_id, check_id, exc)
+            return None
+
+    def _stop_event(self, kind: str, key: str, details: Dict[str, Any]) -> None:
+        payload = stop_payload(kind, key, details)
+        if kind == "anomaly" and str(payload.get("check_id") or "") == "1011":
+            size = self._volume_bytes(
+                payload.get("resource_id"), 1011, payload.get("start_time"), payload.get("end_time")
+            )
+            if size:
+                payload["volume_bytes"] = int(size)
+        self.process(payload)
     def _load_resource_meta(self, rid: int) -> None:
         """Fetch ports/protocols and the geo-filter state of one resource."""
         base = str(self.cfg.get("api_url") or "").rstrip("/")
@@ -349,7 +399,7 @@ class KdpPuller(threading.Thread):
                     LOG.warning("attack without id skipped: %s", json.dumps(item)[:300])
                     continue
                 if is_closed_status(payload):
-                    self.process(stop_payload(kind, key, payload))
+                    self._stop_event(kind, key, payload)
                     continue
                 active[key] = payload
                 self.process(payload)
@@ -422,7 +472,7 @@ class KdpPuller(threading.Thread):
                 if (now - last_seen).total_seconds() < self.grace_seconds:
                     continue
                 details = json.loads(row["details"] or "{}")
-                self.process(stop_payload(kind, row["event_key"], details))
+                self._stop_event(kind, row["event_key"], details)
                 closed += 1
                 LOG.info("closed %s: absent from KDP active list", row["event_key"])
         return closed
