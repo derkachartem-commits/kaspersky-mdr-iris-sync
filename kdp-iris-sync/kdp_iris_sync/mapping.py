@@ -96,6 +96,12 @@ def _context_lines(payload: Dict[str, Any]) -> list[str]:
         f"Ресурс: {payload.get('resource_name')} (id={payload.get('resource_id')})",
         f"Группа: {payload.get('group_name')} (id={payload.get('group_id')})",
     ]
+    ips = payload.get("_ips") or payload.get("attacked_ips") or []
+    if ips:
+        lines.append("Адреса: " + ", ".join(str(x) for x in ips))
+    ports = payload.get("attacked_ports") or payload.get("dst_ports") or payload.get("ports") or []
+    if ports:
+        lines.append("Порты: " + ", ".join(str(x) for x in ports))
     if msg.startswith("attack"):
         mp = payload.get("max_point_values") or {}
         lines += [
@@ -261,6 +267,12 @@ def build_case_payload(
     )
     if start:
         description += f" Начало: {start}."
+    ips = payload.get("_ips") or []
+    if ips:
+        description += " Адреса: " + ", ".join(str(x) for x in ips) + "."
+    ports = payload.get("attacked_ports") or []
+    if ports:
+        description += " Порты: " + ", ".join(str(x) for x in ports) + "."
 
     body: Dict[str, Any] = {
         "case_title": title[:190],

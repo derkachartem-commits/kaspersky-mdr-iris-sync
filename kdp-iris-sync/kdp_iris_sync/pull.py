@@ -65,6 +65,7 @@ def attack_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "group_id": _pick(item, "group_id"),
         "group_name": _pick(item, "group_name"),
         "attacked_ips": item.get("attacked_ips") or [],
+        "attacked_ports": item.get("attacked_ports") or item.get("dst_ports") or item.get("ports") or [],
         "max_point_values": {
             "bps": _pick(max_point, "bps", default=_pick(item, "bps", "peak_bps", default=0)),
             "pps": _pick(max_point, "pps", default=_pick(item, "pps", "peak_pps", default=0)),
@@ -144,6 +145,9 @@ class KdpPuller(threading.Thread):
         # Called on 401/403 so the token refresher can re-login immediately.
         self.on_auth_error: Optional[Callable[[], None]] = None
         self.session.headers.update(self._headers())
+        # resource_id -> [ips]; refreshed periodically from /resources/
+        self.resources: Dict[int, List[str]] = {}
+        self._resources_loaded_at: Optional[datetime] = None
 
     # ------------------------------------------------------------------ http
     def _headers(self) -> Dict[str, str]:
@@ -206,11 +210,65 @@ class KdpPuller(threading.Thread):
         self.session.headers.update(self._headers())
         LOG.info("KDP puller switched to the refreshed token")
 
+    def _load_resources(self) -> None:
+        """Cache resource_id -> IP list from the KDP cabinet."""
+        base = str(self.cfg.get("api_url") or "").rstrip("/")
+        if not base:
+            return
+        url = str(self.cfg.get("resources_url") or (base + "/resources/"))
+        body = {"locale_id": int(self.cfg.get("resources_locale_id", 10))}
+        try:
+            resp = self.session.post(
+                url,
+                json=body,
+                verify=self.cfg.get("ca_bundle") or self.cfg.get("verify", True),
+                timeout=int(self.cfg.get("timeout", 30)),
+            )
+            if resp.status_code != 200:
+                LOG.warning("resources HTTP %s: %s", resp.status_code, resp.text[:200])
+                return
+            items = resp.json()
+            if isinstance(items, dict):
+                items = items.get("data") or []
+            cache: Dict[int, List[str]] = {}
+            for item in items or []:
+                try:
+                    rid = int(item.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                ips = [str(x) for x in (item.get("ips") or []) if x]
+                cache[rid] = ips
+            self.resources = cache
+            self._resources_loaded_at = datetime.now(timezone.utc)
+            LOG.info("KDP resources loaded: %s", len(cache))
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("cannot load KDP resources: %s", exc)
+
+    def _resources_stale(self) -> bool:
+        hours = max(1, int(self.cfg.get("resources_refresh_hours", 6)))
+        if not self._resources_loaded_at:
+            return True
+        return (datetime.now(timezone.utc) - self._resources_loaded_at) > timedelta(hours=hours)
+
+    def _enrich(self, payload: Dict[str, Any]) -> None:
+        """Attach the resource addresses (and keep the cache fresh)."""
+        try:
+            rid = int(payload.get("resource_id"))
+        except (TypeError, ValueError):
+            return
+        if rid not in self.resources:
+            self._load_resources()
+        ips = self.resources.get(rid)
+        if ips:
+            payload["_ips"] = ips
     # ------------------------------------------------------------------ poll
     def poll_once(self) -> Dict[str, int]:
         base = str(self.cfg.get("api_url") or "").rstrip("/")
         attacks_url = self.cfg.get("attacks_url") or (base + self.cfg.get("attacks_path", "") if base else None)
         anomalies_url = self.cfg.get("anomalies_url") or (base + self.cfg.get("anomalies_path", "") if base else None)
+
+        if self._resources_stale():
+            self._load_resources()
 
         stats = {"attacks": 0, "anomalies": 0, "closed": 0}
         polled: List[Tuple[str, Dict[str, str]]] = []
@@ -220,6 +278,7 @@ class KdpPuller(threading.Thread):
             active = {}
             for item in items:
                 payload = attack_payload(item)
+                self._enrich(payload)
                 key, kind, _ = event_identity(payload)
                 if not payload.get("attack_id"):
                     LOG.warning("attack without id skipped: %s", json.dumps(item)[:300])
