@@ -289,7 +289,8 @@ class KdpPuller(threading.Thread):
 
     def _stop_event(self, kind: str, key: str, details: Dict[str, Any]) -> None:
         payload = stop_payload(kind, key, details)
-        if kind == "anomaly" and str(payload.get("check_id") or "") == "1011":
+        if kind == "anomaly":
+            # volume is always derived from the bps series of the resource
             size = self._volume_bytes(
                 payload.get("resource_id"), 1011, payload.get("start_time"), payload.get("end_time")
             )

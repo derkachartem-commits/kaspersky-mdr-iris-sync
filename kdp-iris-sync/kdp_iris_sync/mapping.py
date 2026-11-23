@@ -321,9 +321,9 @@ def case_dates(payload: Dict[str, Any]) -> Dict[str, str]:
     start = str(payload.get("start_time") or payload.get("timestamp") or "")
     end = str(payload.get("end_time") or "")
     if len(start) >= 10:
-        out["open_date"] = start[:10]
+        out["open_date"] = start
     if len(end) >= 10:
-        out["close_date"] = end[:10]
+        out["close_date"] = end
     return out
 
 

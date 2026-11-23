@@ -6,12 +6,14 @@ import html
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import requests
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
@@ -226,6 +228,83 @@ def _maybe_escalate(
         return None
 
 
+
+_VOL_LAST: Dict[int, float] = {}
+
+
+def _kdp_volume_bytes(resource_id, start, end):
+    """Bytes moved by the resource between start and end (bps series)."""
+    kdp = CONFIG.get("kdp") or {}
+    base = str(kdp.get("api_url") or "").rstrip("/")
+    token = kdp.get("token")
+    if not base or not token or not resource_id or not start or not end:
+        return None
+    try:
+        resp = requests.post(
+            base + "/unit_checks/values/",
+            json={"filter": {"check_ids": [1011], "date_from": start, "date_to": end,
+                             "points_count": 480, "resource_id": int(resource_id)}},
+            headers={"Authorization": f"Bearer {token}"},
+            verify=kdp.get("verify", True),
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return None
+        series = []
+        for value in (resp.json() or {}).values():
+            series = (value or {}).get("dirty") or (value or {}).get("values") or []
+            if series:
+                break
+        total = 0.0
+        prev = None
+        for ts, val in series:
+            if val is None:
+                continue
+            moment = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if prev is not None:
+                seconds = (moment - prev[0]).total_seconds()
+                if 0 < seconds <= 300:
+                    total += (prev[1] + float(val)) / 2.0 * seconds
+            prev = (moment, float(val))
+        return (total / 8.0) if total else None
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("cannot compute volume for %s: %s", resource_id, exc)
+        return None
+
+
+def refresh_case_volumes() -> None:
+    """Keep the traffic volume line in open KDP cases up to date (5 min throttle)."""
+    now = datetime.now(timezone.utc)
+    for row in STATE.list_events("open", limit=200):
+        if not row["case_id"] or row["kind"] != "anomaly":
+            continue
+        case_id = int(row["case_id"])
+        if now.timestamp() - _VOL_LAST.get(case_id, 0) < 300:
+            continue
+        try:
+            details = json.loads(row["details"] or "{}")
+        except ValueError:
+            continue
+        rid = details.get("resource_id")
+        start = details.get("start_time") or details.get("timestamp")
+        if not rid or not start:
+            continue
+        size = _kdp_volume_bytes(rid, start, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        if not size:
+            continue
+        _VOL_LAST[case_id] = now.timestamp()
+        line = "Объём трафика за период: %.2f ГБ (%.0f МБ), обновлено %s МСК" % (
+            size / 1e9, size / 1e6, now.astimezone().strftime("%H:%M"))
+        try:
+            case = IRIS.get_case(case_id)
+            desc = str(case.get("case_description") or "")
+            cleaned = re.sub(r"Объём трафика за период:[^\n]*\n?", "", desc).rstrip()
+            if line in cleaned:
+                continue
+            IRIS.update_case(case_id, {"case_description": (cleaned + "\n\n" + line)[:8000]})
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("cannot update case %s volume: %s", case_id, exc)
+
 def _auto_close_reason(
     alert_id: int,
     *,
@@ -438,6 +517,7 @@ def reconcile_loop(stop: threading.Event) -> None:
     while not stop.is_set():
         try:
             reconcile_groups()
+            refresh_case_volumes()
         except Exception as exc:  # noqa: BLE001
             LOG.warning("reconcile failed: %s", exc)
         stop.wait(120)
