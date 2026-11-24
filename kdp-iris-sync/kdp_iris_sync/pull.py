@@ -445,7 +445,7 @@ class KdpPuller(threading.Thread):
 
     def _is_stale(self, payload: Dict[str, Any]) -> bool:
         """An anomaly is over when KDP stopped refreshing its last-seen tick."""
-        limit = max(60, int(self.cfg.get("anomaly_stale_seconds", 600)))
+        limit = max(300, int(self.cfg.get("anomaly_stale_seconds", 3600)))
         raw = str(payload.get("_last") or "").strip()
         if not raw:
             return False
