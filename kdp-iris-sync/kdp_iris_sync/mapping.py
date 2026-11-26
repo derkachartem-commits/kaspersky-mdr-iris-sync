@@ -318,6 +318,10 @@ def build_case_payload(
         "case_soc_id": f"KDP-{external_id}",
         "case_customer_id": int(iris_cfg.get("customer_id", 1)),
         "case_tags": f"kdp,{kind}",
+        # IRIS v3.0.0-beta.1 escalate route iterates these lists directly:
+        # leaving them out raises TypeError and the case is never created.
+        "iocs_import_list": [],
+        "assets_import_list": [],
     }
     if template_id:
         body["case_template_id"] = int(template_id)
