@@ -44,7 +44,7 @@ ALTER TABLE cases ALTER COLUMN close_date TYPE timestamp USING close_date::times
 
 ### 7. `.env`
 ```
-IRIS_ALLOW_ORIGIN=https://neko.vbrr.online:8446,https://IRIS_HOST_OLD:8446
+IRIS_ALLOW_ORIGIN=https://neko.vbrr.online:8446,https://<IP-хоста>:8446
 PUBLIC_EXTERNAL_API_URL=https://neko.vbrr.online:8446
 ```
 Без домена в `IRIS_ALLOW_ORIGIN` Socket.IO отклоняет рукопожатие → тело кейса висит скелетоном.

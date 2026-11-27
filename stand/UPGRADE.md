@@ -2,7 +2,7 @@
 
 > Все пути ниже — относительно каталога `stand/` этого репозитория.
 
-Проверено на IRIS_HOST (Ubuntu 24.04, `/opt/iris-web`, проект `iris-web`).
+Проверено на тестовом стенде (Ubuntu 24.04, `/opt/iris-web`, проект `iris-web`).
 Текущая версия стенда: **v3.0.0-beta.1**. Последний тег upstream на 27.11.2026 — **v3.0.0-beta.23**.
 
 ## Главные правила
@@ -16,7 +16,7 @@
 ## Шаг 1. Бэкап
 
 ```bash
-cd /opt/iris-stand-patches && git pull            # свежие скрипты
+cd /opt/mdr-soc && git pull          # свежие скрипты (каталог stand/)
 sudo ./scripts/upgrade-stack.sh --backup-only
 ```
 
@@ -51,7 +51,7 @@ git ls-remote --tags https://github.com/dfir-iris/iris-web.git \
 ## Шаг 4. Обновление стенда
 
 ```bash
-cd /opt/iris-stand-patches
+cd /opt/mdr-soc/stand
 sudo ./scripts/upgrade-stack.sh v3.0.0-beta.23
 ```
 

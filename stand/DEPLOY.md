@@ -2,7 +2,7 @@
 
 > Все пути ниже — относительно каталога `stand/` этого репозитория.
 
-Проверено 26.11.2026 на IRIS_HOST (Ubuntu 24.04, /opt/iris-web, проект `iris-web`, порт 8446).
+Проверено 26.11.2026 на тестовом стенде (Ubuntu 24.04, /opt/iris-web, проект `iris-web`, порт 8446).
 
 ## 0. Что где лежит
 
@@ -44,8 +44,8 @@ docker compose pull && docker compose up -d
 ## 3. Патчи стенда
 
 ```bash
-git clone <этот репозиторий> /opt/iris-stand-patches
-cd /opt/iris-stand-patches && ./scripts/apply-beta1.sh
+git clone https://github.com/derkachartem-commits/kaspersky-mdr-iris-sync.git /opt/mdr-soc
+cd /opt/mdr-soc/stand && ./scripts/apply-beta1.sh
 ```
 
 Скрипт идемпотентный: копирует патчи, ставит `docker-compose.override.yml`,
