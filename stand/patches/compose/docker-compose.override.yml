@@ -1,0 +1,17 @@
+services:
+  app:
+    volumes:
+      - ./patches/named_aggregations.py:/iriswebapp/app/datamgmt/custom_dashboard/named_aggregations.py:ro
+      - ./patches/tasks.py:/iriswebapp/app/blueprints/rest/v2/case_routes/tasks.py:ro
+      - ./patches/models_cases.py:/iriswebapp/app/models/cases.py:ro
+  worker:
+    volumes:
+      - ./patches/named_aggregations.py:/iriswebapp/app/datamgmt/custom_dashboard/named_aggregations.py:ro
+      - ./patches/models_cases.py:/iriswebapp/app/models/cases.py:ro
+  nginx:
+    # /entrypoint.sh подставляет env в шаблон и сразу делает exec nginx, поэтому
+    # патч gzip/http2/immutable накатывается в фоне и перезагружает nginx.
+    entrypoint: ["/bin/bash", "-c", "/bin/sh /opt/iris-patch/50-iris-patch-after-start.sh & exec /entrypoint.sh"]
+    volumes:
+      - "./certificates/web_certificates/:/www/certs/:ro"
+      - ./patches:/opt/iris-patch:ro

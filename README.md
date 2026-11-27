@@ -345,3 +345,16 @@ python -m unittest discover -s tests -v
 ## Лицензия
 
 MIT — см. `LICENSE`.
+
+## Состав репозитория
+
+Один репозиторий на всю связку «коннекторы + стенд IRIS»:
+
+| Путь | Что это |
+|---|---|
+| `kdp-iris-sync/` | коннектор Kaspersky DDoS Protection (KDP) → DFIR-IRIS: алерты, эскалация в кейсы, объём трафика, авто-закрытие |
+| `mdr_iris_sync/` | коннектор Kaspersky MDR → DFIR-IRIS (код синхронизации) |
+| `stand/` | стенд IRIS v3: патчи, compose-override, установка/обновление, дашборд SOC — см. [stand/README.md](stand/README.md) |
+| `examples/`, `docs/`, `tests/`, `deploy/` | примеры конфигов/шаблонов, документация, тесты, юниты |
+
+Ключевые документы по стенду: `stand/DEPLOY.md` (перенос на новый хост) и `stand/UPGRADE.md` (обновление до новой версии без потери данных).

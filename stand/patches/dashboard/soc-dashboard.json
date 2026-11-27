@@ -1,0 +1,277 @@
+{
+ "name": "SOC — открытые кейсы и алерты",
+ "description": "Оперативная сводка: нагрузка на аналитика, неразобранные кейсы, открытые алерты, критичность и время закрытия.",
+ "is_shared": true,
+ "filters_schema": [
+  {
+   "key": "start",
+   "type": "date",
+   "label": "Начало"
+  },
+  {
+   "key": "end",
+   "type": "date",
+   "label": "Конец"
+  }
+ ],
+ "sections": [
+  {
+   "id": "sec-now",
+   "title": "Сейчас",
+   "show_divider": false,
+   "description": "Текущее состояние очереди.",
+   "widgets": [
+    {
+     "name": "Кейсы на мне",
+     "chart_type": "number",
+     "layout": {
+      "widget_size": "kpi"
+     },
+     "fields": [
+      {
+       "table": "cases",
+       "column": "case_id",
+       "aggregation": "count",
+       "alias": "total"
+      }
+     ],
+     "filters": [
+      {
+       "table": "cases",
+       "column": "owner_id",
+       "operator": "eq",
+       "value": 2
+      },
+      {
+       "table": "cases",
+       "column": "status_id",
+       "operator": "eq",
+       "value": 0
+      }
+     ],
+     "options": {
+      "help": "Открытые кейсы с владельцем derkach_av."
+     }
+    },
+    {
+     "name": "Кейсы без владельца",
+     "chart_type": "number",
+     "layout": {
+      "widget_size": "kpi"
+     },
+     "fields": [
+      {
+       "table": "cases",
+       "column": "case_id",
+       "aggregation": "count",
+       "alias": "total"
+      }
+     ],
+     "filters": [
+      {
+       "table": "cases",
+       "column": "owner_id",
+       "operator": "is_null"
+      },
+      {
+       "table": "cases",
+       "column": "status_id",
+       "operator": "eq",
+       "value": 0
+      }
+     ],
+     "options": {
+      "help": "Открытые кейсы без назначенного владельца."
+     }
+    },
+    {
+     "name": "Все открытые кейсы",
+     "chart_type": "number",
+     "layout": {
+      "widget_size": "kpi"
+     },
+     "fields": [
+      {
+       "table": "computed",
+       "column": "cases_open_total",
+       "alias": "cases_open_total"
+      }
+     ],
+     "options": {
+      "help": "Все кейсы в статусе Open."
+     }
+    },
+    {
+     "name": "Алерты без кейса",
+     "chart_type": "number",
+     "layout": {
+      "widget_size": "kpi"
+     },
+     "fields": [
+      {
+       "table": "alerts",
+       "column": "alert_id",
+       "aggregation": "count",
+       "alias": "total"
+      }
+     ],
+     "filters": [
+      {
+       "table": "alerts",
+       "column": "alert_status_id",
+       "operator": "in",
+       "value": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "options": {
+      "help": "Открытые алерты, не эскалированные в кейс."
+     }
+    },
+    {
+     "name": "Открыты дольше 24 ч",
+     "chart_type": "number",
+     "layout": {
+      "widget_size": "kpi"
+     },
+     "fields": [
+      {
+       "table": "computed",
+       "column": "cases_open_over_24h",
+       "alias": "cases_open_over_24h"
+      }
+     ],
+     "options": {
+      "help": "Открытые кейсы, у которых open_date старше 24 часов."
+     }
+    }
+   ]
+  },
+  {
+   "id": "sec-charts",
+   "title": "Критичность и время закрытия",
+   "show_divider": true,
+   "widgets": [
+    {
+     "name": "Кейсы по критичности (7 дней)",
+     "chart_type": "bar",
+     "layout": {
+      "widget_size": "half"
+     },
+     "fields": [
+      {
+       "table": "severities",
+       "column": "severity_name",
+       "alias": "severity"
+      },
+      {
+       "table": "cases",
+       "column": "case_id",
+       "aggregation": "count",
+       "alias": "total"
+      }
+     ],
+     "group_by": [
+      "severities.severity_name"
+     ],
+     "options": {
+      "sort": "desc",
+      "help": "Считаются кейсы, связанные с алертами."
+     }
+    },
+    {
+     "name": "Среднее время закрытия кейса",
+     "chart_type": "number",
+     "layout": {
+      "widget_size": "half"
+     },
+     "fields": [
+      {
+       "table": "computed",
+       "column": "cases_avg_close_hours",
+       "alias": "cases_avg_close_hours"
+      }
+     ],
+     "options": {
+      "help": "Среднее (close_date − open_date) в часах по кейсам, закрытым в окне."
+     }
+    },
+    {
+     "name": "Закрытия кейсов по дням",
+     "chart_type": "timechart",
+     "layout": {
+      "widget_size": "full"
+     },
+     "time_bucket": "day",
+     "fields": [
+      {
+       "table": "cases",
+       "column": "case_id",
+       "aggregation": "count",
+       "alias": "total"
+      }
+     ],
+     "group_by": [
+      "cases.close_date"
+     ],
+     "options": {
+      "sort": "asc",
+      "time_column": "cases.close_date"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sec-table",
+   "title": "Открытые кейсы",
+   "show_divider": true,
+   "widgets": [
+    {
+     "name": "Открытые кейсы: возраст",
+     "chart_type": "table",
+     "layout": {
+      "widget_size": "full"
+     },
+     "fields": [
+      {
+       "table": "cases",
+       "column": "name",
+       "alias": "case"
+      },
+      {
+       "table": "cases",
+       "column": "open_date",
+       "alias": "opened"
+      },
+      {
+       "table": "case_owner",
+       "column": "name",
+       "alias": "owner"
+      }
+     ],
+     "filters": [
+      {
+       "table": "cases",
+       "column": "status_id",
+       "operator": "eq",
+       "value": 0
+      }
+     ],
+     "group_by": [
+      "cases.name",
+      "cases.open_date",
+      "case_owner.name"
+     ],
+     "options": {
+      "sort": "asc"
+     }
+    }
+   ]
+  }
+ ]
+}
