@@ -358,3 +358,17 @@ MIT — см. `LICENSE`.
 | `examples/`, `docs/`, `tests/`, `deploy/` | примеры конфигов/шаблонов, документация, тесты, юниты |
 
 Ключевые документы по стенду: `stand/DEPLOY.md` (перенос на новый хост) и `stand/UPGRADE.md` (обновление до новой версии без потери данных).
+
+## Обновление всего контура одной командой
+
+`scripts/upgrade-all.sh` обновляет и коннектор, и стенд: бэкап → `git pull` → синхронизация кода коннектора (без перезаписи `config.json` и `state/`) → `pip install` → перезапуск сервиса → переприменение патчей стенда → smoke.
+
+```bash
+sudo ./scripts/upgrade-all.sh                            # код коннектора + патчи стенда, версия IRIS не меняется
+sudo ./scripts/upgrade-all.sh --version v3.0.0-beta.23   # дополнительно поднять версию IRIS (с бэкапом и откатом)
+sudo ./scripts/upgrade-all.sh --backup-only              # только бэкап
+sudo ./scripts/upgrade-all.sh --check                    # ничего не менять, только показать состояние
+sudo ./scripts/upgrade-all.sh --connector-only | --stand-only
+```
+
+Данные не теряются: `/opt/kdp-iris-sync/config.json`, `state/`, `/opt/iris-web/.env`, тома Docker и сертификаты не перезаписываются. Бэкап складывается в `/root/iris-backup-<дата>`, откат кода — `git reset --hard <commit из бэкапа>`, откат версии IRIS — раздел «Откат» в `stand/UPGRADE.md`.
